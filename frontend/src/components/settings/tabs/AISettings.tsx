@@ -203,6 +203,7 @@ const AISettings: React.FC<AISettingsProps> = ({
               modelName={config.chat.model}
               apiKey={config.chat.apiKey}
               temperature={config.chat.temperature}
+              onModelChange={(value) => onChatConfigChange('model', value)}
             />
           </div>
         </section>
@@ -288,6 +289,7 @@ const AISettings: React.FC<AISettingsProps> = ({
               baseUrl={config.embedding.baseUrl}
               modelName={config.embedding.model}
               apiKey={config.embedding.apiKey}
+              onModelChange={(value) => onEmbeddingConfigChange('model', value)}
             />
           </div>
         </section>

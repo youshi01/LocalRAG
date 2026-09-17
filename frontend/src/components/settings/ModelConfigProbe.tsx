@@ -1,7 +1,8 @@
-import React, { useState } from 'react'
-import { testChatModelConfig, testEmbeddingModelConfig } from '../../services/api'
+import React, { useEffect, useState } from 'react'
+import { fetchAvailableModels, probeModel } from '../../services/api'
 import type { ChatConfig, EmbeddingConfig } from '../../App'
-import type { TestModelResponse } from '../../services/api'
+import type { ModelOption, ModelProbeResponse } from '../../services/api'
+import { modelOptionLabel, resetModelOptionsKey } from './modelOptions'
 
 type ModelConfigTestProps =
   | {
@@ -11,6 +12,7 @@ type ModelConfigTestProps =
       modelName: string
       apiKey: string
       temperature: number
+      onModelChange: (value: string) => void
     }
   | {
       type: 'embedding'
@@ -19,12 +21,8 @@ type ModelConfigTestProps =
       modelName: string
       apiKey: string
       temperature?: never
+      onModelChange: (value: string) => void
     }
-
-const testLabelByType: Record<ModelConfigTestProps['type'], string> = {
-  chat: '测试聊天模型',
-  embedding: '测试 Embedding',
-}
 
 const defaultSuccessMessage: Record<ModelConfigTestProps['type'], string> = {
   chat: '聊天模型连接正常',
@@ -32,12 +30,47 @@ const defaultSuccessMessage: Record<ModelConfigTestProps['type'], string> = {
 }
 
 export const ModelConfigTest: React.FC<ModelConfigTestProps> = (props) => {
+  const [availableModels, setAvailableModels] = useState<ModelOption[]>([])
+  const [loadingModels, setLoadingModels] = useState(false)
+  const [modelListError, setModelListError] = useState('')
   const [testing, setTesting] = useState(false)
-  const [result, setResult] = useState<TestModelResponse | null>(null)
+  const [result, setResult] = useState<ModelProbeResponse | null>(null)
   const [errorMessage, setErrorMessage] = useState('')
 
   const hasRequiredConfig = Boolean(props.baseUrl.trim() && props.modelName.trim())
-  const buttonLabel = testing ? '测试中...' : testLabelByType[props.type]
+  const modelOptionsKey = resetModelOptionsKey(props.type, props.provider, props.baseUrl)
+
+  useEffect(() => {
+    setAvailableModels([])
+    setModelListError('')
+  }, [modelOptionsKey])
+
+  const handleDiscovery = async () => {
+    if (!props.baseUrl.trim() || loadingModels) {
+      return
+    }
+
+    setLoadingModels(true)
+    setModelListError('')
+
+    try {
+      const nextResult = await fetchAvailableModels({
+        provider: props.provider,
+        baseUrl: props.baseUrl,
+        apiKey: props.apiKey,
+      }, props.type)
+
+      if (nextResult.success) {
+        setAvailableModels(nextResult.models)
+      } else {
+        setModelListError(nextResult.error_message || '获取模型失败')
+      }
+    } catch (error) {
+      setModelListError(error instanceof Error ? error.message : '获取模型请求失败')
+    } finally {
+      setLoadingModels(false)
+    }
+  }
 
   const handleTest = async () => {
     if (!hasRequiredConfig || testing) {
@@ -51,7 +84,7 @@ export const ModelConfigTest: React.FC<ModelConfigTestProps> = (props) => {
     try {
       const nextResult =
         props.type === 'chat'
-          ? await testChatModelConfig({
+          ? await probeModel({
               provider: props.provider,
               baseUrl: props.baseUrl,
               model: props.modelName,
@@ -59,13 +92,13 @@ export const ModelConfigTest: React.FC<ModelConfigTestProps> = (props) => {
               temperature: props.temperature,
               knowledgeTemperature: 0.1,
               contextMessageLimit: 1,
-            })
-          : await testEmbeddingModelConfig({
+            }, props.type)
+          : await probeModel({
               provider: props.provider,
               baseUrl: props.baseUrl,
               model: props.modelName,
               apiKey: props.apiKey,
-            })
+            }, props.type)
 
       setResult(nextResult)
     } catch (error) {
@@ -76,21 +109,54 @@ export const ModelConfigTest: React.FC<ModelConfigTestProps> = (props) => {
   }
 
   const message =
-    result?.model_info ||
-    result?.error_message ||
-    errorMessage ||
-    (hasRequiredConfig ? '' : '请先填写 Base URL 和 Model')
+    result?.success
+      ? defaultSuccessMessage[props.type]
+      : result?.error_message ||
+        errorMessage ||
+        (result ? '模型探测失败' : hasRequiredConfig ? '' : '请先填写 Base URL 和 Model')
 
   return (
     <div className="model-config-test">
-      <button
-        type="button"
-        className="test-connection-btn"
-        onClick={() => void handleTest()}
-        disabled={!hasRequiredConfig || testing}
-      >
-        {buttonLabel}
-      </button>
+      <div className="model-discovery-controls">
+        <button
+          type="button"
+          className="test-connection-btn"
+          onClick={() => void handleDiscovery()}
+          disabled={!props.baseUrl.trim() || loadingModels}
+        >
+          {loadingModels ? '获取中...' : '获取模型'}
+        </button>
+        <button
+          type="button"
+          className="test-connection-btn"
+          onClick={() => void handleTest()}
+          disabled={!hasRequiredConfig || testing}
+        >
+          {testing ? '探测中...' : '探测模型'}
+        </button>
+      </div>
+
+      {availableModels.length > 0 ? (
+        <select
+          aria-label="可用模型"
+          className="model-discovery-select"
+          value={props.modelName}
+          onChange={(event) => props.onModelChange(event.target.value)}
+        >
+          <option value="">请选择候选模型</option>
+          {availableModels.map((option) => (
+            <option key={option.id} value={option.name}>
+              {modelOptionLabel(option)}
+            </option>
+          ))}
+        </select>
+      ) : null}
+
+      {modelListError ? (
+        <div className="model-discovery-error" role="alert">
+          {modelListError}
+        </div>
+      ) : null}
 
       {message ? (
         <div
@@ -102,10 +168,8 @@ export const ModelConfigTest: React.FC<ModelConfigTestProps> = (props) => {
         >
           <span className="test-icon">{result?.success ? 'OK' : '!'}</span>
           <div className="test-details">
-            <span className="test-message">
-              {result?.success ? defaultSuccessMessage[props.type] : message}
-            </span>
-            {result?.success && result.model_info ? (
+            <span className="test-message">{message}</span>
+            {result?.model_info ? (
               <span className="test-info">{result.model_info}</span>
             ) : null}
             {typeof result?.latency_ms === 'number' ? (

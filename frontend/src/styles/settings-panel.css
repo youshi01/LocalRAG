@@ -2050,6 +2050,33 @@
   flex-wrap: wrap;
 }
 
+.model-discovery-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.model-discovery-select {
+  min-width: min(240px, 100%);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--settings-control-border);
+  border-radius: var(--radius-md);
+  background: var(--settings-control-bg);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.model-discovery-select:focus-visible {
+  outline: none;
+  box-shadow: var(--settings-control-focus);
+}
+
+.model-discovery-error {
+  width: 100%;
+  color: var(--settings-error-text);
+  font-size: var(--text-sm);
+}
+
 .test-connection-btn {
   padding: var(--space-2) var(--space-3);
   font-size: var(--text-sm);
@@ -2767,6 +2794,15 @@
   .model-config-test {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .model-discovery-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .model-discovery-select {
+    width: 100%;
   }
 
   .test-connection-btn {

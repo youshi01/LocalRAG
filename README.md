@@ -182,6 +182,18 @@ Docker Desktop（Windows）中的后端访问宿主机 Ollama 时，Base URL 使
 - Model: `nomic-embed-text`
 - API Key: 留空
 
+### 模型发现与健康探测
+
+设置页中的 Base URL 必须填写**服务根地址**，而不是具体模型 API 路径：Ollama 例如
+`http://localhost:11434`；Docker Desktop（Windows）中的后端访问宿主机 Ollama 时使用
+`http://host.docker.internal:11434`。OpenAI Compatible Base URL 可以填写提供商根地址，
+也可以填写以 `/v1` 结尾的地址；后端会统一规范化为所需的 `/v1` 基址。
+
+- **获取模型**：向当前 Provider 读取可用模型候选列表，不会下载模型；请先在 Ollama 或对应 Provider 中安装/提供模型。
+- **探测模型**：向所选 Chat 或 Embedding 模型发送一次真实请求，并在设置页显示本次请求的 latency（毫秒）。
+- **Embedding 维度**：Embedding 探测会返回实际向量维度；要成功用于索引，该维度必须与 `QDRANT_VECTOR_SIZE` 匹配。不匹配时应调整模型或 Qdrant 配置，并使用新的 `QDRANT_COLLECTION_PREFIX` 后重新索引。
+- **保存行为**：探测仅检查当前表单值，不会自动保存配置；探测失败也不会自动覆盖或写入当前已保存的模型配置。确认配置后，请使用设置页的“保存”按钮。
+
 ### OpenAI Compatible 示例
 
 **Chat 配置**

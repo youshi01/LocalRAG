@@ -33,6 +33,7 @@ localrag/
 │   │   │   ├── app_state_store_test.go
 │   │   │   ├── embedding_cache.go       # LRU 嵌入缓存（2048条，thread-safe）
 │   │   │   ├── llm_service.go           # LLM 调用（OpenAI兼容 + Ollama原生 + 降级）
+│   │   │   ├── model_service.go         # 模型发现、端点规范化与真实连通性探测
 │   │   │   ├── qdrant_service.go        # Qdrant HTTP 客户端
 │   │   │   ├── rag_service.go           # 切分/嵌入/检索（OpenAI兼容 + Ollama原生）
 │   │   │   ├── rag_service_test.go
@@ -82,6 +83,8 @@ localrag/
 | GET | `/health` | 健康检查，返回 Qdrant 状态和配置概要 |
 | GET | `/api/config` | 获取 Chat + Embedding 配置 |
 | PUT | `/api/config` | 更新 Chat + Embedding 配置 |
+| POST | `/api/config/models` | 从当前 Provider 读取 Chat 或 Embedding 模型候选；只列出候选，不下载模型 |
+| POST | `/api/config/models/probe` | 对当前表单中的 Chat 或 Embedding 模型发起真实探测，返回 `success`、latency 和 Embedding 维度匹配结果；不会保存配置 |
 | GET | `/api/knowledge-bases` | 列出所有知识库 |
 | POST | `/api/knowledge-bases` | 创建知识库 |
 | DELETE | `/api/knowledge-bases/:id` | 删除知识库（含 Qdrant 集合）|

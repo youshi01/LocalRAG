@@ -59,10 +59,7 @@ func (s *ModelService) ListModels(parent context.Context, request model.ModelLis
 		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(request.APIKey))
 	}
 
-	client := s.client
-	if client == nil {
-		client = &http.Client{Timeout: modelDiscoveryTimeout}
-	}
+	client := singleAttemptHTTPClient(s.client)
 	started := time.Now()
 	response, err := client.Do(req)
 	result.LatencyMs = nonNegativeMilliseconds(time.Since(started))
@@ -133,6 +130,16 @@ func (s *ModelService) ListModels(parent context.Context, request model.ModelLis
 	return result, nil
 }
 
+func singleAttemptHTTPClient(client *http.Client) *http.Client {
+	if client == nil {
+		client = &http.Client{}
+	}
+	clone := *client
+	clone.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return &clone
+}
 func decodeStrictJSON(reader io.Reader, destination any) error {
 	body, err := io.ReadAll(io.LimitReader(reader, modelDiscoveryMaxBodyBytes+1))
 	if err != nil {
@@ -375,10 +382,7 @@ func (s *ModelService) doProbeJSON(ctx context.Context, endpoint string, payload
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
-	client := s.client
-	if client == nil {
-		client = &http.Client{}
-	}
+	client := singleAttemptHTTPClient(s.client)
 	response, err := client.Do(req)
 	if err != nil {
 		return err

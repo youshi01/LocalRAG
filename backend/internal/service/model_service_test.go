@@ -332,6 +332,16 @@ func TestProbeOpenAICompatibleEmbeddingReportsDimensionMismatch(t *testing.T) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/embeddings" || r.Header.Get("Authorization") != "Bearer embed-secret" {
 			t.Fatalf("unexpected request: method=%s path=%s authorization=%q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
 		}
+		var payload struct {
+			Model string   `json:"model"`
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		if payload.Model != "text-embedding" || len(payload.Input) != 1 || payload.Input[0] != "LocalRAG model health probe" {
+			t.Fatalf("unexpected payload: %#v", payload)
+		}
 		_, _ = io.WriteString(w, `{"data":[{"index":0,"embedding":[0.1,0.2]}]}`)
 	}))
 	t.Cleanup(server.Close)
@@ -424,5 +434,82 @@ func TestProbeRejectsAnyEmptyEmbeddingVector(t *testing.T) {
 				t.Fatalf("expected empty embedding response, got result=%#v err=%v", result, err)
 			}
 		})
+	}
+}
+
+func TestProbeDoesNotFollowRedirect(t *testing.T) {
+	targetCalls := 0
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetCalls++
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"OK"}}]}`)
+	}))
+	t.Cleanup(target.Close)
+
+	sourceCalls := 0
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sourceCalls++
+		http.Redirect(w, r, target.URL+"/redirect-target", http.StatusFound)
+	}))
+	t.Cleanup(source.Close)
+
+	result, err := (&ModelService{client: source.Client()}).Probe(t.Context(), model.ModelProbeRequest{
+		Type: model.ModelKindChat, Provider: "openai-compatible", BaseURL: source.URL, Model: "redirect-model",
+	}, 0)
+	if err != nil || result.Success || result.ErrorCode != "upstream_error" || result.ErrorMessage != "模型服务请求失败" {
+		t.Fatalf("expected safe redirect failure, got result=%#v err=%v", result, err)
+	}
+	if sourceCalls != 1 || targetCalls != 0 {
+		t.Fatalf("expected exactly one source request and no target request, got source=%d target=%d", sourceCalls, targetCalls)
+	}
+	if result.LatencyMs < 0 {
+		t.Fatalf("expected non-negative latency, got %d", result.LatencyMs)
+	}
+}
+
+func TestProbeAuthenticationFailureIsSafe(t *testing.T) {
+	const apiKey = "probe-auth-secret"
+	const upstreamBody = "upstream-auth-body-secret"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":{"message":"`+upstreamBody+`"}}`, http.StatusUnauthorized)
+	}))
+	t.Cleanup(server.Close)
+
+	result, err := (&ModelService{client: server.Client()}).Probe(t.Context(), model.ModelProbeRequest{
+		Type: model.ModelKindChat, Provider: "openai-compatible", BaseURL: server.URL, Model: "protected-model", APIKey: apiKey,
+	}, 0)
+	if err != nil || result.Success || result.ErrorCode != "authentication_failed" || result.ErrorMessage != "模型服务鉴权失败" {
+		t.Fatalf("expected safe authentication failure, got result=%#v err=%v", result, err)
+	}
+	if strings.Contains(result.ErrorMessage, apiKey) || strings.Contains(result.ErrorMessage, upstreamBody) {
+		t.Fatalf("probe error leaked sensitive data: %q", result.ErrorMessage)
+	}
+	if result.LatencyMs < 0 {
+		t.Fatalf("expected non-negative latency, got %d", result.LatencyMs)
+	}
+}
+
+func TestListModelsDoesNotFollowRedirect(t *testing.T) {
+	targetCalls := 0
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetCalls++
+		_, _ = io.WriteString(w, `{"data":[{"id":"redirected-model"}]}`)
+	}))
+	t.Cleanup(target.Close)
+
+	sourceCalls := 0
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sourceCalls++
+		http.Redirect(w, r, target.URL+"/redirect-target", http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(source.Close)
+
+	result, err := (&ModelService{client: source.Client()}).ListModels(t.Context(), model.ModelListRequest{
+		Type: model.ModelKindChat, Provider: "openai-compatible", BaseURL: source.URL,
+	})
+	if err != nil || result.Success || result.ErrorCode != "upstream_error" {
+		t.Fatalf("expected redirect failure, got result=%#v err=%v", result, err)
+	}
+	if sourceCalls != 1 || targetCalls != 0 {
+		t.Fatalf("expected exactly one source request and no target request, got source=%d target=%d", sourceCalls, targetCalls)
 	}
 }

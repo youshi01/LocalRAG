@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -27,10 +28,13 @@ type ModelService struct {
 }
 
 func NewModelService() *ModelService {
-	return &ModelService{client: &http.Client{Timeout: modelDiscoveryTimeout}}
+	return &ModelService{client: &http.Client{}}
 }
 
 func (s *ModelService) ListModels(parent context.Context, request model.ModelListRequest) (model.ModelListResponse, error) {
+	if parent == nil {
+		parent = context.Background()
+	}
 	normalizedType, err := normalizeModelKind(request.Type)
 	if err != nil {
 		return model.ModelListResponse{}, err
@@ -177,11 +181,265 @@ func classifyDiscoveryStatus(status int) (string, string) {
 	}
 }
 
-func (s *ModelService) Probe(_ context.Context, request model.ModelProbeRequest, _ int) (model.ModelProbeResponse, error) {
-	if _, err := normalizeModelKind(request.Type); err != nil {
+type modelProbeError struct {
+	code    string
+	message string
+}
+
+func (e *modelProbeError) Error() string { return e.message }
+
+func probeError(code, message string) error {
+	return &modelProbeError{code: code, message: message}
+}
+
+func (s *ModelService) Probe(parent context.Context, request model.ModelProbeRequest, expectedVectorSize int) (model.ModelProbeResponse, error) {
+	normalizedType, err := normalizeModelKind(request.Type)
+	if err != nil {
 		return model.ModelProbeResponse{}, err
 	}
-	return model.ModelProbeResponse{}, nil
+	normalizedProvider, baseURL, err := normalizeModelEndpoint(request.Provider, request.BaseURL)
+	if err != nil {
+		return model.ModelProbeResponse{}, err
+	}
+	requestedModel := strings.TrimSpace(request.Model)
+	if requestedModel == "" {
+		return model.ModelProbeResponse{}, fmt.Errorf("model name is required")
+	}
+	if parent == nil {
+		parent = context.Background()
+	}
+
+	result := model.ModelProbeResponse{
+		Type:               normalizedType,
+		Provider:           normalizedProvider,
+		Model:              requestedModel,
+		ExpectedVectorSize: expectedVectorSize,
+	}
+	ctx, cancel := context.WithTimeout(parent, modelProbeTimeout)
+	defer cancel()
+
+	temperature := 0.0
+	if request.Temperature >= 0 && !math.IsInf(request.Temperature, 0) && !math.IsNaN(request.Temperature) {
+		temperature = request.Temperature
+	}
+	started := time.Now()
+	var returnedModel string
+	var vectorSize int
+	call := func(runCtx context.Context) error {
+		switch normalizedType {
+		case model.ModelKindChat:
+			var modelName string
+			if normalizedProvider == "ollama" {
+				modelName, err = s.probeOllamaChat(runCtx, baseURL, requestedModel, temperature)
+			} else {
+				modelName, err = s.probeOpenAIChat(runCtx, baseURL, requestedModel, strings.TrimSpace(request.APIKey), temperature)
+			}
+			returnedModel = modelName
+			return err
+		case model.ModelKindEmbedding:
+			if normalizedProvider == "ollama" {
+				vectorSize, err = s.probeOllamaEmbedding(runCtx, baseURL, requestedModel)
+			} else {
+				vectorSize, err = s.probeOpenAIEmbedding(runCtx, baseURL, requestedModel, strings.TrimSpace(request.APIKey))
+			}
+			return err
+		default:
+			return probeError("upstream_error", "模型服务请求失败")
+		}
+	}
+	if normalizedProvider == "ollama" {
+		if normalizedType == model.ModelKindChat {
+			err = sharedModelRuntimeScheduler.run(ctx, modelRuntimePriorityLow, call)
+		} else {
+			err = sharedEmbeddingRuntimeScheduler.run(ctx, modelRuntimePriorityLow, call)
+		}
+	} else {
+		err = call(ctx)
+	}
+	result.LatencyMs = nonNegativeMilliseconds(time.Since(started))
+	if err != nil {
+		result.ErrorCode, result.ErrorMessage = classifyProbeError(ctx, err)
+		return result, nil
+	}
+
+	if normalizedType == model.ModelKindEmbedding {
+		result.VectorSize = vectorSize
+		matched := expectedVectorSize <= 0 || vectorSize == expectedVectorSize
+		result.DimensionMatch = &matched
+		if !matched {
+			result.ErrorCode = "dimension_mismatch"
+			result.ErrorMessage = "模型向量维度不匹配"
+			return result, nil
+		}
+	} else if strings.TrimSpace(returnedModel) != "" {
+		result.Model = strings.TrimSpace(returnedModel)
+	}
+	result.Success = true
+	return result, nil
+}
+
+func (s *ModelService) probeOllamaChat(ctx context.Context, baseURL, modelName string, temperature float64) (string, error) {
+	think := false
+	var response ollamaChatResponse
+	err := s.doProbeJSON(ctx, baseURL+"/api/chat", ollamaChatRequest{
+		Model: modelName,
+		Messages: []model.ChatMessage{{
+			Role:    "user",
+			Content: "Please reply with OK only.",
+		}},
+		Stream:  false,
+		Think:   &think,
+		Options: &ollamaOptions{Temperature: temperature},
+	}, "", &response)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(response.Message.Content) == "" {
+		return "", probeError("empty_response", "模型服务返回为空")
+	}
+	return strings.TrimSpace(response.Model), nil
+}
+
+func (s *ModelService) probeOpenAIChat(ctx context.Context, baseURL, modelName, apiKey string, temperature float64) (string, error) {
+	var response openAIChatResponse
+	payload := struct {
+		Model       string              `json:"model"`
+		Messages    []model.ChatMessage `json:"messages"`
+		Stream      bool                `json:"stream"`
+		Temperature float64             `json:"temperature"`
+		MaxTokens   int                 `json:"max_tokens"`
+	}{
+		Model:       modelName,
+		Messages:    []model.ChatMessage{{Role: "user", Content: "Please reply with OK only."}},
+		Stream:      false,
+		Temperature: temperature,
+		MaxTokens:   16,
+	}
+	if err := s.doProbeJSON(ctx, baseURL+"/chat/completions", payload, apiKey, &response); err != nil {
+		return "", err
+	}
+	if len(response.Choices) == 0 || strings.TrimSpace(response.Choices[0].Message.Content) == "" {
+		return "", probeError("empty_response", "模型服务返回为空")
+	}
+	return strings.TrimSpace(response.Model), nil
+}
+
+func (s *ModelService) probeOllamaEmbedding(ctx context.Context, baseURL, modelName string) (int, error) {
+	var response ollamaEmbedResponse
+	if err := s.doProbeJSON(ctx, baseURL+"/api/embed", ollamaEmbedRequest{
+		Model: modelName,
+		Input: []string{"LocalRAG model health probe"},
+	}, "", &response); err != nil {
+		return 0, err
+	}
+	if len(response.Embeddings) == 0 {
+		return 0, probeError("empty_response", "模型服务返回为空")
+	}
+	for _, vector := range response.Embeddings {
+		if len(vector) == 0 {
+			return 0, probeError("empty_response", "模型服务返回为空")
+		}
+	}
+	return len(response.Embeddings[0]), nil
+}
+
+func (s *ModelService) probeOpenAIEmbedding(ctx context.Context, baseURL, modelName, apiKey string) (int, error) {
+	var response openAIEmbeddingResponse
+	if err := s.doProbeJSON(ctx, baseURL+"/embeddings", openAIEmbeddingRequest{
+		Model: modelName,
+		Input: []string{"LocalRAG model health probe"},
+	}, apiKey, &response); err != nil {
+		return 0, err
+	}
+	if len(response.Data) == 0 {
+		return 0, probeError("empty_response", "模型服务返回为空")
+	}
+	for _, item := range response.Data {
+		if len(item.Embedding) == 0 {
+			return 0, probeError("empty_response", "模型服务返回为空")
+		}
+	}
+	return len(response.Data[0].Embedding), nil
+}
+
+func (s *ModelService) doProbeJSON(ctx context.Context, endpoint string, payload any, apiKey string, destination any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return probeError("upstream_error", "模型服务请求失败")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return probeError("upstream_error", "模型服务请求失败")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	client := s.client
+	if client == nil {
+		client = &http.Client{}
+	}
+	response, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return classifyProbeStatus(response.StatusCode, readProbeErrorText(response.Body))
+	}
+	if err := decodeStrictJSON(response.Body, destination); err != nil {
+		return probeError("invalid_response", "模型服务响应格式无效")
+	}
+	return nil
+}
+
+func readProbeErrorText(reader io.Reader) string {
+	body, err := io.ReadAll(io.LimitReader(reader, modelDiscoveryMaxBodyBytes+1))
+	if err != nil || len(body) > modelDiscoveryMaxBodyBytes {
+		return ""
+	}
+	var payload struct {
+		Error   json.RawMessage `json:"error"`
+		Message string          `json:"message"`
+	}
+	if json.Unmarshal(body, &payload) != nil {
+		return ""
+	}
+	if len(payload.Error) > 0 {
+		var text string
+		if json.Unmarshal(payload.Error, &text) == nil {
+			return text
+		}
+		var details struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(payload.Error, &details) == nil {
+			return details.Message
+		}
+	}
+	return payload.Message
+}
+
+func classifyProbeStatus(status int, responseText string) error {
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		return probeError("authentication_failed", "模型服务鉴权失败")
+	}
+	text := strings.ToLower(responseText)
+	if strings.Contains(text, "model") && (strings.Contains(text, "not found") || strings.Contains(text, "does not exist")) {
+		return probeError("model_not_found", "指定模型不存在")
+	}
+	return probeError("upstream_error", "模型服务请求失败")
+}
+
+func classifyProbeError(ctx context.Context, err error) (string, string) {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return "timeout", "模型服务请求超时"
+	}
+	var probeErr *modelProbeError
+	if errors.As(err, &probeErr) {
+		return probeErr.code, probeErr.message
+	}
+	return "upstream_error", "模型服务请求失败"
 }
 
 func normalizeModelKind(kind model.ModelKind) (model.ModelKind, error) {

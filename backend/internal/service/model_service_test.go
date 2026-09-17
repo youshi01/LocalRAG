@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"localrag/internal/model"
 )
@@ -227,5 +229,200 @@ func TestListModelsDeduplicatesAndSortsIDs(t *testing.T) {
 	}
 	if result.Models[0].ID != "a-model" || result.Models[1].ID != "z-model" {
 		t.Fatalf("expected sorted unique IDs, got %#v", result.Models)
+	}
+}
+
+func TestProbeOllamaChatSendsExpectedPayload(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/chat" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var payload struct {
+			Model    string              `json:"model"`
+			Messages []model.ChatMessage `json:"messages"`
+			Stream   bool                `json:"stream"`
+			Think    *bool               `json:"think"`
+			Options  struct {
+				Temperature float64 `json:"temperature"`
+			} `json:"options"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		if payload.Model != "qwen3.5:9b" || payload.Stream || payload.Think == nil || *payload.Think || payload.Options.Temperature != 0.25 {
+			t.Fatalf("unexpected payload: %#v", payload)
+		}
+		if len(payload.Messages) != 1 || payload.Messages[0].Content != "Please reply with OK only." {
+			t.Fatalf("unexpected probe message: %#v", payload.Messages)
+		}
+		_, _ = io.WriteString(w, `{"model":"qwen3.5:9b","message":{"role":"assistant","content":"OK"}}`)
+	}))
+	t.Cleanup(server.Close)
+	result, err := (&ModelService{client: server.Client()}).Probe(t.Context(), model.ModelProbeRequest{Type: model.ModelKindChat, Provider: "ollama", BaseURL: server.URL, Model: "qwen3.5:9b", Temperature: 0.25}, 0)
+	if err != nil || !result.Success || result.Model != "qwen3.5:9b" {
+		t.Fatalf("probe chat: result=%#v err=%v", result, err)
+	}
+	if result.LatencyMs < 0 {
+		t.Fatalf("expected non-negative latency, got %d", result.LatencyMs)
+	}
+}
+
+func TestProbeOpenAICompatibleChatSendsBearerAndExpectedPayload(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer probe-secret" {
+			t.Fatalf("unexpected request: method=%s path=%s authorization=%q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
+		}
+		var payload struct {
+			Model       string              `json:"model"`
+			Messages    []model.ChatMessage `json:"messages"`
+			Stream      bool                `json:"stream"`
+			Temperature float64             `json:"temperature"`
+			MaxTokens   int                 `json:"max_tokens"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		if payload.Model != "gpt-test" || payload.Stream || payload.Temperature != 0.5 || payload.MaxTokens != 16 {
+			t.Fatalf("unexpected payload: %#v", payload)
+		}
+		if len(payload.Messages) != 1 || payload.Messages[0].Content != "Please reply with OK only." {
+			t.Fatalf("unexpected probe message: %#v", payload.Messages)
+		}
+		_, _ = io.WriteString(w, `{"model":"returned-model","choices":[{"message":{"role":"assistant","content":"OK"}}]}`)
+	}))
+	t.Cleanup(server.Close)
+	result, err := (&ModelService{client: server.Client()}).Probe(t.Context(), model.ModelProbeRequest{Type: model.ModelKindChat, Provider: "openai-compatible", BaseURL: server.URL, Model: "gpt-test", APIKey: "probe-secret", Temperature: 0.5}, 0)
+	if err != nil || !result.Success || result.Model != "returned-model" {
+		t.Fatalf("probe chat: result=%#v err=%v", result, err)
+	}
+}
+
+func TestProbeOllamaEmbeddingReturnsDimensionAndLatency(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/embed" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var payload struct {
+			Model string   `json:"model"`
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		if payload.Model != "nomic-embed-text" || len(payload.Input) != 1 || payload.Input[0] != "LocalRAG model health probe" {
+			t.Fatalf("unexpected payload: %#v", payload)
+		}
+		_, _ = io.WriteString(w, `{"embeddings":[[0.1,0.2,0.3]]}`)
+	}))
+	t.Cleanup(server.Close)
+	result, err := (&ModelService{client: server.Client()}).Probe(t.Context(), model.ModelProbeRequest{Type: model.ModelKindEmbedding, Provider: "ollama", BaseURL: server.URL, Model: "nomic-embed-text"}, 3)
+	if err != nil || !result.Success || result.VectorSize != 3 || result.ExpectedVectorSize != 3 {
+		t.Fatalf("probe embedding: result=%#v err=%v", result, err)
+	}
+	if result.DimensionMatch == nil || *result.DimensionMatch != true {
+		t.Fatalf("expected dimension match marker, got %#v", result.DimensionMatch)
+	}
+	if result.LatencyMs < 0 {
+		t.Fatalf("expected non-negative latency, got %d", result.LatencyMs)
+	}
+}
+
+func TestProbeOpenAICompatibleEmbeddingReportsDimensionMismatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/embeddings" || r.Header.Get("Authorization") != "Bearer embed-secret" {
+			t.Fatalf("unexpected request: method=%s path=%s authorization=%q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
+		}
+		_, _ = io.WriteString(w, `{"data":[{"index":0,"embedding":[0.1,0.2]}]}`)
+	}))
+	t.Cleanup(server.Close)
+	result, err := (&ModelService{client: server.Client()}).Probe(t.Context(), model.ModelProbeRequest{Type: model.ModelKindEmbedding, Provider: "openai-compatible", BaseURL: server.URL, Model: "text-embedding", APIKey: "embed-secret"}, 3)
+	if err != nil || result.Success || result.ErrorCode != "dimension_mismatch" || result.VectorSize != 2 || result.ExpectedVectorSize != 3 {
+		t.Fatalf("expected dimension mismatch, got result=%#v err=%v", result, err)
+	}
+	if result.DimensionMatch == nil || *result.DimensionMatch != false {
+		t.Fatalf("expected dimension mismatch marker, got %#v", result.DimensionMatch)
+	}
+}
+
+func TestProbeMapsHTTP400ModelNotFoundWithOneRequest(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		time.Sleep(10 * time.Millisecond)
+		http.Error(w, `{"error":{"message":"model missing-model not found"}}`, http.StatusBadRequest)
+	}))
+	t.Cleanup(server.Close)
+	result, err := (&ModelService{client: server.Client()}).Probe(t.Context(), model.ModelProbeRequest{Type: model.ModelKindChat, Provider: "openai-compatible", BaseURL: server.URL, Model: "missing-model"}, 0)
+	if err != nil || result.Success || result.ErrorCode != "model_not_found" || calls != 1 {
+		t.Fatalf("expected one model-not-found attempt, got result=%#v err=%v calls=%d", result, err, calls)
+	}
+	if result.LatencyMs <= 0 {
+		t.Fatalf("expected recorded upstream-failure latency, got %d", result.LatencyMs)
+	}
+}
+
+func TestProbeClassifiesParentDeadlineAsTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(time.Second):
+		}
+	}))
+	t.Cleanup(server.Close)
+	parent, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	result, err := (&ModelService{client: server.Client()}).Probe(parent, model.ModelProbeRequest{Type: model.ModelKindChat, Provider: "ollama", BaseURL: server.URL, Model: "slow-model"}, 0)
+	if err != nil || result.Success || result.ErrorCode != "timeout" {
+		t.Fatalf("expected timeout, got result=%#v err=%v", result, err)
+	}
+	if time.Since(started) > time.Second {
+		t.Fatalf("probe waited for default timeout")
+	}
+}
+
+func TestProbeClassifiesEmptyAndInvalidResponses(t *testing.T) {
+	cases := []struct{ name, body, wantCode string }{
+		{name: "empty response", body: `{"choices":[{"message":{"content":" "}}]}`, wantCode: "empty_response"},
+		{name: "invalid json", body: `{`, wantCode: "invalid_response"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, tc.body) }))
+			t.Cleanup(server.Close)
+			result, err := (&ModelService{client: server.Client()}).Probe(t.Context(), model.ModelProbeRequest{Type: model.ModelKindChat, Provider: "openai-compatible", BaseURL: server.URL, Model: "gpt-test"}, 0)
+			if err != nil || result.Success || result.ErrorCode != tc.wantCode {
+				t.Fatalf("expected %s, got result=%#v err=%v", tc.wantCode, result, err)
+			}
+		})
+	}
+}
+
+func TestProbeRejectsAnyEmptyEmbeddingVector(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider string
+		path     string
+		body     string
+	}{
+		{name: "ollama", provider: "ollama", path: "/api/embed", body: `{"embeddings":[[0.1],[]]}`},
+		{name: "openai", provider: "openai-compatible", path: "/v1/embeddings", body: `{"data":[{"index":0,"embedding":[0.1]},{"index":1,"embedding":[]}]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tc.path {
+					t.Fatalf("unexpected path: %s", r.URL.Path)
+				}
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			t.Cleanup(server.Close)
+			result, err := (&ModelService{client: server.Client()}).Probe(t.Context(), model.ModelProbeRequest{
+				Type: model.ModelKindEmbedding, Provider: tc.provider, BaseURL: server.URL, Model: "embedding-test",
+			}, 0)
+			if err != nil || result.Success || result.ErrorCode != "empty_response" {
+				t.Fatalf("expected empty embedding response, got result=%#v err=%v", result, err)
+			}
+		})
 	}
 }

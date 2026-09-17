@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 2,
+  "baselineName": "v1.5-20260901",
+  "capturedAt": "2026-09-01T14:42:50.206Z",
+  "metrics": {
+    "entryGzipBytes": 85609,
+    "initialJavaScriptRawBytes": 601424,
+    "initialJavaScriptGzipBytes": 178647,
+    "maxInitialChunkRawBytes": 301876,
+    "maxAsyncChunkRawBytes": 621879,
+    "maxAsyncChunkGzipBytes": 148552,
+    "asyncChunkCount": 55,
+    "maxAsyncChartRawBytes": 621879,
+    "maxAsyncChartGzipBytes": 148552,
+    "asyncChartChunkCount": 33
+  },
+  "initialChartAssets": [],
+  "largestAssets": [
+    {
+      "name": "mermaid.core.js",
+      "rawBytes": 621879,
+      "gzipBytes": 148552,
+      "initial": false
+    },
+    {
+      "name": "wardley.js",
+      "rawBytes": 615456,
+      "gzipBytes": 148071,
+      "initial": false
+    },
+    {
+      "name": "diagram.js",
+      "rawBytes": 442442,
+      "gzipBytes": 141566,
+      "initial": false
+    },
+    {
+      "name": "index.js",
+      "rawBytes": 301876,
+      "gzipBytes": 85609,
+      "initial": true
+    },
+    {
+      "name": "katex.js",
+      "rawBytes": 258684,
+      "gzipBytes": 76488,
+      "initial": false
+    },
+    {
+      "name": "markdown.js",
+      "rawBytes": 156608,
+      "gzipBytes": 47325,
+      "initial": true
+    },
+    {
+      "name": "react.js",
+      "rawBytes": 142940,
+      "gzipBytes": 45713,
+      "initial": true
+    },
+    {
+      "name": "diagram.js",
+      "rawBytes": 124532,
+      "gzipBytes": 34370,
+      "initial": false
+    },
+    {
+      "name": "sequenceDiagram.js",
+      "rawBytes": 117374,
+      "gzipBytes": 31142,
+      "initial": false
+    },
+    {
+      "name": "diagram.js",
+      "rawBytes": 77559,
+      "gzipBytes": 20709,
+      "initial": false
+    },
+    {
+      "name": "blockDiagram.js",
+      "rawBytes": 75168,
+      "gzipBytes": 21523,
+      "initial": false
+    },
+    {
+      "name": "c4Diagram.js",
+      "rawBytes": 70029,
+      "gzipBytes": 19626,
+      "initial": false
+    }
+  ],
+  "notes": [
+    "只记录构建产物大小、稳定化模块名和首屏标志，不记录用户数据或运行内容。",
+    "基线比较用于发现回归，绝对上限由 check-build-budget.mjs 单独执行。"
+  ]
+}

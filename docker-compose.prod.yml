@@ -1,0 +1,143 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.13.4
+    container_name: qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_BIND_ADDRESS:-127.0.0.1}:${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_BIND_ADDRESS:-127.0.0.1}:${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    environment:
+      - LOCALRAG_QDRANT_API_KEY=${QDRANT_API_KEY:-}
+      - LOCALRAG_QDRANT_BIND_ADDRESS=${QDRANT_BIND_ADDRESS:-127.0.0.1}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        case "$$LOCALRAG_QDRANT_BIND_ADDRESS" in
+          127.0.0.1|::1|localhost) ;;
+          *)
+            if [ -z "$$LOCALRAG_QDRANT_API_KEY" ]; then
+              echo "QDRANT_API_KEY must be set when QDRANT_BIND_ADDRESS is not loopback" >&2
+              exit 1
+            fi
+            ;;
+        esac
+        if [ -n "$$LOCALRAG_QDRANT_API_KEY" ]; then
+          export QDRANT__SERVICE__API_KEY="$$LOCALRAG_QDRANT_API_KEY"
+        fi
+        exec ./entrypoint.sh
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333; if [ -n \"$$LOCALRAG_QDRANT_API_KEY\" ]; then printf \"GET /collections HTTP/1.1\\r\\nHost: localhost\\r\\napi-key: %s\\r\\nConnection: close\\r\\n\\r\\n\" \"$$LOCALRAG_QDRANT_API_KEY\" >&3; else printf \"GET /collections HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" >&3; fi; head -n 1 <&3 | grep -q \" 200 \"'"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: ${LOG_MAX_SIZE:-10m}
+        max-file: ${LOG_MAX_FILE:-3}
+    mem_limit: ${QDRANT_MEMORY_LIMIT:-1g}
+    cpus: ${QDRANT_CPU_LIMIT:-2.0}
+    pids_limit: ${QDRANT_PIDS_LIMIT:-512}
+
+  backend:
+    image: ghcr.io/youshi01/localrag-backend:${LOCALRAG_IMAGE_TAG:-${AI_LOCALBASE_IMAGE_TAG:-v1.4.6}}
+    container_name: localrag-backend
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_BIND_ADDRESS:-127.0.0.1}:${PORT:-8080}:${PORT:-8080}"
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    environment:
+      - PORT=${PORT:-8080}
+      - UPLOAD_DIR=${UPLOAD_DIR:-/app/data/uploads}
+      - INDEXED_CONTENT_DIR=${INDEXED_CONTENT_DIR:-/app/data/indexed-content}
+      - STAGING_DIR=${STAGING_DIR:-/app/data/staging}
+      - MAX_UPLOAD_BYTES=${MAX_UPLOAD_BYTES:-26214400}
+      - MAX_JSON_BODY_BYTES=${MAX_JSON_BODY_BYTES:-4194304}
+      - STATE_FILE=${STATE_FILE:-/app/data/app-state.json}
+      - CHAT_HISTORY_FILE=${CHAT_HISTORY_FILE:-/app/data/chat-history.db}
+      - MCP_JOB_STORE_FILE=${MCP_JOB_STORE_FILE:-/app/data/mcp-jobs.db}
+      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+      - QDRANT_API_KEY=${QDRANT_API_KEY:-}
+      - QDRANT_COLLECTION_PREFIX=${QDRANT_COLLECTION_PREFIX:-kb_}
+      - QDRANT_VECTOR_SIZE=${QDRANT_VECTOR_SIZE:-768}
+      - QDRANT_DISTANCE=${QDRANT_DISTANCE:-Cosine}
+      - QDRANT_TIMEOUT_SECONDS=${QDRANT_TIMEOUT_SECONDS:-5}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - ENABLE_AUTH=${ENABLE_AUTH:-true}
+      - AUTH_USERNAME=${AUTH_USERNAME:-root}
+      - AUTH_PASSWORD=${AUTH_PASSWORD:-}
+      - AUTH_SETUP_TOKEN=${AUTH_SETUP_TOKEN:-}
+      - AUTH_RESET_TOKEN=${AUTH_RESET_TOKEN:-}
+      - AUTH_RESET_PASSWORD=${AUTH_RESET_PASSWORD:-}
+      - JWT_SECRET=${JWT_SECRET:-}
+      - ENABLE_HYBRID_SEARCH=${ENABLE_HYBRID_SEARCH:-false}
+      - ENABLE_SEMANTIC_RERANKER=${ENABLE_SEMANTIC_RERANKER:-false}
+      - ENABLE_QUERY_REWRITE=${ENABLE_QUERY_REWRITE:-false}
+      - ENABLE_SEMANTIC_CACHE=${ENABLE_SEMANTIC_CACHE:-false}
+      - ENABLE_CONTEXT_COMPRESSION=${ENABLE_CONTEXT_COMPRESSION:-false}
+      - RETRIEVAL_TOPK_DOCUMENT=${RETRIEVAL_TOPK_DOCUMENT:-6}
+      - RETRIEVAL_CANDIDATE_TOPK_DOCUMENT=${RETRIEVAL_CANDIDATE_TOPK_DOCUMENT:-12}
+      - RETRIEVAL_TOPK_KNOWLEDGE_BASE=${RETRIEVAL_TOPK_KNOWLEDGE_BASE:-10}
+      - RETRIEVAL_CANDIDATE_TOPK_ALL_DOCS=${RETRIEVAL_CANDIDATE_TOPK_ALL_DOCS:-32}
+      - RETRIEVAL_MAX_CHUNKS_PER_DOCUMENT=${RETRIEVAL_MAX_CHUNKS_PER_DOCUMENT:-2}
+      - RETRIEVAL_MAX_CONTEXT_CHARS=${RETRIEVAL_MAX_CONTEXT_CHARS:-2400}
+      - RETRIEVAL_ENABLE_AUTO_EXPAND=${RETRIEVAL_ENABLE_AUTO_EXPAND:-false}
+      - ENABLE_MCP=${ENABLE_MCP:-false}
+      - ENABLE_MCP_LEGACY_TOKEN=${ENABLE_MCP_LEGACY_TOKEN:-false}
+      - MCP_BASE_PATH=${MCP_BASE_PATH:-/mcp}
+      - MCP_REQUEST_TIMEOUT_SECONDS=${MCP_REQUEST_TIMEOUT_SECONDS:-15}
+      - MCP_REQUESTS_PER_MINUTE=${MCP_REQUESTS_PER_MINUTE:-120}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./backend/data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:${PORT:-8080}/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: ${LOG_MAX_SIZE:-10m}
+        max-file: ${LOG_MAX_FILE:-3}
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-1g}
+    cpus: ${BACKEND_CPU_LIMIT:-2.0}
+    pids_limit: ${BACKEND_PIDS_LIMIT:-256}
+
+  frontend:
+    image: ghcr.io/youshi01/localrag-frontend:${LOCALRAG_IMAGE_TAG:-${AI_LOCALBASE_IMAGE_TAG:-v1.4.6}}
+    container_name: localrag-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-4173}:4173"
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      - NGINX_BACKEND_PORT=${PORT:-8080}
+      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://localhost:8080}
+      - NGINX_TRUST_EXTERNAL_PROXY_HEADERS=${TRUST_EXTERNAL_PROXY_HEADERS:-false}
+      - NGINX_CLIENT_MAX_BODY_SIZE=${NGINX_CLIENT_MAX_BODY_SIZE:-32m}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: ${LOG_MAX_SIZE:-10m}
+        max-file: ${LOG_MAX_FILE:-3}
+    mem_limit: ${FRONTEND_MEMORY_LIMIT:-256m}
+    cpus: ${FRONTEND_CPU_LIMIT:-1.0}
+    pids_limit: ${FRONTEND_PIDS_LIMIT:-128}
+
+volumes:
+  qdrant_storage:

@@ -1,0 +1,71 @@
+package main
+
+import (
+	"testing"
+
+	"localrag/internal/model"
+)
+
+func TestValidateAuthConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  model.ServerConfig
+		wantErr string
+	}{
+		{
+			name: "auth disabled",
+			config: model.ServerConfig{
+				EnableAuth: false,
+			},
+		},
+		{
+			name: "auth enabled enters setup without password",
+			config: model.ServerConfig{
+				EnableAuth: true,
+			},
+		},
+		{
+			name: "auth enabled accepts password without jwt secret",
+			config: model.ServerConfig{
+				EnableAuth:   true,
+				AuthPassword: "password123",
+			},
+		},
+		{
+			name: "legacy jwt secret is optional",
+			config: model.ServerConfig{
+				EnableAuth:   true,
+				AuthPassword: "password123",
+				JWTSecret:    "short",
+			},
+		},
+		{
+			name:    "auth enabled rejects weak bootstrap password",
+			config:  model.ServerConfig{EnableAuth: true, AuthPassword: "1234567"},
+			wantErr: "AUTH_PASSWORD must be at least 8 characters when ENABLE_AUTH=true",
+		},
+		{
+			name:    "auth enabled rejects weak reset password",
+			config:  model.ServerConfig{EnableAuth: true, AuthResetToken: "reset-token", AuthResetPassword: "1234567"},
+			wantErr: "AUTH_RESET_PASSWORD must be at least 8 characters when ENABLE_AUTH=true",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateAuthConfig(tt.config)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error %q, got nil", tt.wantErr)
+			}
+			if err.Error() != tt.wantErr {
+				t.Fatalf("expected error %q, got %q", tt.wantErr, err.Error())
+			}
+		})
+	}
+}

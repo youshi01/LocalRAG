@@ -1,0 +1,109 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"localrag/internal/model"
+)
+
+func LoadServerConfig() model.ServerConfig {
+	uploadDir := getEnv("UPLOAD_DIR", "data/uploads")
+	return model.ServerConfig{
+		Port:                           getEnv("PORT", "8080"),
+		UploadDir:                      uploadDir,
+		IndexedContentDir:              getEnv("INDEXED_CONTENT_DIR", filepath.Join(filepath.Dir(uploadDir), "indexed-content")),
+		StagingDir:                     getEnv("STAGING_DIR", filepath.Join(filepath.Dir(uploadDir), "staging")),
+		MCPJobStoreFile:                getEnv("MCP_JOB_STORE_FILE", "data/mcp-jobs.db"),
+		MaxUploadBytes:                 getEnvAsInt64("MAX_UPLOAD_BYTES", 25*1024*1024),
+		MaxJSONBodyBytes:               getEnvAsInt64("MAX_JSON_BODY_BYTES", 4*1024*1024),
+		StateFile:                      getEnv("STATE_FILE", "data/app-state.json"),
+		ChatHistoryFile:                getEnv("CHAT_HISTORY_FILE", "data/chat-history.db"),
+		QdrantURL:                      getEnv("QDRANT_URL", "http://localhost:6333"),
+		QdrantAPIKey:                   getEnv("QDRANT_API_KEY", ""),
+		QdrantCollectionPrefix:         getEnv("QDRANT_COLLECTION_PREFIX", "kb_"),
+		QdrantVectorSize:               getEnvAsInt("QDRANT_VECTOR_SIZE", 768),
+		QdrantDistance:                 getEnv("QDRANT_DISTANCE", "Cosine"),
+		QdrantTimeoutSeconds:           getEnvAsInt("QDRANT_TIMEOUT_SECONDS", 5),
+		EnableHybridSearch:             getEnvAsBool("ENABLE_HYBRID_SEARCH", false),
+		EnableSemanticReranker:         getEnvAsBool("ENABLE_SEMANTIC_RERANKER", false),
+		EnableQueryRewrite:             getEnvAsBool("ENABLE_QUERY_REWRITE", false),
+		EnableSemanticCache:            getEnvAsBool("ENABLE_SEMANTIC_CACHE", false),
+		EnableContextCompression:       getEnvAsBool("ENABLE_CONTEXT_COMPRESSION", false),
+		OllamaBaseURL:                  getEnv("OLLAMA_BASE_URL", "http://localhost:11434"),
+		EnableMCP:                      getEnvAsBool("ENABLE_MCP", false),
+		EnableMCPLegacyToken:           getEnvAsBool("ENABLE_MCP_LEGACY_TOKEN", false),
+		MCPBasePath:                    getEnv("MCP_BASE_PATH", "/mcp"),
+		MCPRequestTimeoutSeconds:       getEnvAsInt("MCP_REQUEST_TIMEOUT_SECONDS", 15),
+		MCPRequestsPerMinute:           getEnvAsInt("MCP_REQUESTS_PER_MINUTE", 120),
+		RetrievalTopKDocument:          getEnvAsInt("RETRIEVAL_TOPK_DOCUMENT", 6),
+		RetrievalCandidateTopKDocument: getEnvAsInt("RETRIEVAL_CANDIDATE_TOPK_DOCUMENT", 12),
+		RetrievalTopKKnowledgeBase:     getEnvAsInt("RETRIEVAL_TOPK_KNOWLEDGE_BASE", 10),
+		RetrievalCandidateTopKAllDocs:  getEnvAsInt("RETRIEVAL_CANDIDATE_TOPK_ALL_DOCS", 32),
+		RetrievalMaxChunksPerDocument:  getEnvAsInt("RETRIEVAL_MAX_CHUNKS_PER_DOCUMENT", 2),
+		RetrievalMaxContextChars:       getEnvAsInt("RETRIEVAL_MAX_CONTEXT_CHARS", 2400),
+		RetrievalEnableAutoExpand:      getEnvAsBool("RETRIEVAL_ENABLE_AUTO_EXPAND", false),
+		EvalKnowledgeBaseID:            getEnv("EVAL_KNOWLEDGE_BASE_ID", ""),
+		EnableAuth:                     getEnvAsBool("ENABLE_AUTH", false),
+		AuthUsername:                   getEnv("AUTH_USERNAME", "root"),
+		AuthPassword:                   getEnv("AUTH_PASSWORD", ""),
+		AuthSetupToken:                 getEnv("AUTH_SETUP_TOKEN", ""),
+		AuthResetToken:                 getEnv("AUTH_RESET_TOKEN", ""),
+		AuthResetPassword:              getEnv("AUTH_RESET_PASSWORD", ""),
+		JWTSecret:                      getEnv("JWT_SECRET", ""),
+	}
+}
+
+func getEnv(key, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+
+	return fallback
+}
+
+func getEnvAsInt(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+
+	return parsed
+}
+
+func getEnvAsInt64(key string, fallback int64) int64 {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return fallback
+	}
+
+	return parsed
+}
+
+func getEnvAsBool(key string, fallback bool) bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if value == "" {
+		return fallback
+	}
+
+	switch value {
+	case "true", "1", "yes", "on":
+		return true
+	case "false", "0", "no", "off":
+		return false
+	default:
+		return fallback
+	}
+}

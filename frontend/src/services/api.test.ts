@@ -1,11 +1,60 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  extractErrorMessage,
-  normalizeConversation,
-  normalizeKnowledgeBase,
-  serializeConversation,
+	extractErrorMessage,
+	fetchAvailableModels,
+	normalizeConversation,
+	normalizeKnowledgeBase,
+	probeModel,
+	serializeConversation,
 } from './api'
 import type { BackendConversation, BackendKnowledgeBase } from './api'
+
+afterEach(() => {
+	vi.unstubAllGlobals()
+})
+
+describe('model interface requests', () => {
+	it('posts the draft endpoint to fetch available models', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+			success: true,
+			provider: 'ollama',
+			type: 'chat',
+			models: [{ id: 'qwen3.5:9b', name: 'qwen3.5:9b', type: 'chat' }],
+			latency_ms: 24,
+		}), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+		vi.stubGlobal('fetch', fetchMock)
+
+		const response = await fetchAvailableModels({
+			provider: 'ollama', baseUrl: 'http://localhost:11434', apiKey: '',
+		}, 'chat')
+
+		expect(fetchMock).toHaveBeenCalledWith('/api/config/models', expect.objectContaining({ method: 'POST' }))
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({
+			type: 'chat', provider: 'ollama', baseUrl: 'http://localhost:11434', apiKey: '',
+		})
+		expect(response.models[0].id).toBe('qwen3.5:9b')
+	})
+
+	it('posts the selected model to probe it', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+			success: true, type: 'embedding', provider: 'ollama', model: 'nomic-embed-text',
+			latency_ms: 214, vector_size: 768, expected_vector_size: 768,
+			dimension_match: true,
+		}), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+		vi.stubGlobal('fetch', fetchMock)
+
+		const response = await probeModel({
+			provider: 'ollama', baseUrl: 'http://localhost:11434', model: 'nomic-embed-text', apiKey: '',
+		}, 'embedding')
+
+		expect(fetchMock).toHaveBeenCalledWith('/api/config/models/probe', expect.objectContaining({ method: 'POST' }))
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({
+			type: 'embedding', provider: 'ollama', baseUrl: 'http://localhost:11434',
+			model: 'nomic-embed-text', apiKey: '',
+		})
+		expect(response.dimension_match).toBe(true)
+	})
+})
 
 describe('normalizeConversation', () => {
   it('filters only legacy operational assistant messages', () => {

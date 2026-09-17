@@ -1,8 +1,10 @@
 import type {
   AppConfig,
+  ChatConfig,
   ChatMessage,
   Conversation,
   DocumentItem,
+  EmbeddingConfig,
   KnowledgeBase,
   MCPConfig,
 } from '../App'
@@ -132,6 +134,38 @@ export interface TestModelResponse {
   error_message?: string
   vector_size?: number
   expected_vector_size?: number
+  model_info?: string
+}
+
+export type ModelKind = 'chat' | 'embedding'
+
+export interface ModelOption {
+  id: string
+  name: string
+  type: ModelKind
+}
+
+export interface ModelListResponse {
+  success: boolean
+  provider: string
+  type: ModelKind
+  models: ModelOption[]
+  latency_ms?: number
+  error_code?: string
+  error_message?: string
+}
+
+export interface ModelProbeResponse {
+  success: boolean
+  type: ModelKind
+  provider: string
+  model: string
+  latency_ms?: number
+  error_code?: string
+  error_message?: string
+  vector_size?: number
+  expected_vector_size?: number
+  dimension_match?: boolean
   model_info?: string
 }
 
@@ -928,6 +962,29 @@ export const testChatModelConfig = async (
     '/api/config/test-chat-model',
     jsonRequest(config, { method: 'POST' }),
   )
+)
+
+export const fetchAvailableModels = async (
+  config: Pick<ChatConfig, 'provider' | 'baseUrl' | 'apiKey'> | Pick<EmbeddingConfig, 'provider' | 'baseUrl' | 'apiKey'>,
+  type: ModelKind,
+): Promise<ModelListResponse> => requestJson<ModelListResponse>(
+  '/api/config/models',
+  jsonRequest({ type, provider: config.provider, baseUrl: config.baseUrl, apiKey: config.apiKey }, { method: 'POST' }),
+)
+
+export const probeModel = async (
+  config: ChatConfig | EmbeddingConfig,
+  type: ModelKind,
+): Promise<ModelProbeResponse> => requestJson<ModelProbeResponse>(
+  '/api/config/models/probe',
+  jsonRequest({
+    type,
+    provider: config.provider,
+    baseUrl: config.baseUrl,
+    model: config.model,
+    apiKey: config.apiKey,
+    ...(type === 'chat' && 'temperature' in config ? { temperature: config.temperature } : {}),
+  }, { method: 'POST' }),
 )
 
 export const testEmbeddingModelConfig = async (

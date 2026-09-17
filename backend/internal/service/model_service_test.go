@@ -278,12 +278,36 @@ func TestProbeOllamaChatSendsExpectedPayload(t *testing.T) {
 		_, _ = io.WriteString(w, `{"model":"qwen3.5:9b","message":{"role":"assistant","content":"OK"}}`)
 	}))
 	t.Cleanup(server.Close)
-	result, err := (&ModelService{client: server.Client()}).Probe(t.Context(), model.ModelProbeRequest{Type: model.ModelKindChat, Provider: "ollama", BaseURL: server.URL, Model: "qwen3.5:9b", Temperature: 0.25}, 0)
+	result, err := (&ModelService{client: server.Client()}).Probe(t.Context(), model.ModelProbeRequest{Type: model.ModelKindChat, Provider: "ollama", BaseURL: server.URL, Model: "qwen3.5:9b", Temperature: 0.25}, 768)
 	if err != nil || !result.Success || result.Model != "qwen3.5:9b" {
 		t.Fatalf("probe chat: result=%#v err=%v", result, err)
 	}
+	if result.ExpectedVectorSize != 0 || result.DimensionMatch != nil {
+		t.Fatalf("expected chat probe to omit embedding dimensions, got %#v", result)
+	}
 	if result.LatencyMs < 0 {
 		t.Fatalf("expected non-negative latency, got %d", result.LatencyMs)
+	}
+}
+
+func TestProbeRejectsOutOfRangeChatTemperature(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_, _ = io.WriteString(w, `{"model":"test-model","message":{"role":"assistant","content":"OK"}}`)
+	}))
+	t.Cleanup(server.Close)
+
+	for _, temperature := range []float64{-0.01, 2.01} {
+		result, err := (&ModelService{client: server.Client()}).Probe(t.Context(), model.ModelProbeRequest{
+			Type: model.ModelKindChat, Provider: "ollama", BaseURL: server.URL, Model: "test-model", Temperature: temperature,
+		}, 0)
+		if err == nil {
+			t.Fatalf("expected temperature %.2f to be rejected, result=%#v", temperature, result)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("expected invalid temperature probes not to call upstream, got %d calls", calls)
 	}
 }
 

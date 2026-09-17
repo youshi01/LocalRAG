@@ -1,6 +1,9 @@
 package service
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"localrag/internal/model"
@@ -85,6 +88,96 @@ func TestUpdateConfigPreservesConfiguredSecretsWhenPublicConfigIsSaved(t *testin
 	}
 	if internal.Chat.Model != "updated-chat-model" || internal.Embedding.Model != "updated-embedding-model" {
 		t.Fatalf("expected non-secret config fields to update, got %+v", internal)
+	}
+}
+
+func TestUpdateConfigDoesNotCarryChatSecretAcrossEndpointChange(t *testing.T) {
+	var authorization string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = r.Header.Get("Authorization")
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = io.WriteString(w, `{"model":"chat-model","choices":[{"message":{"role":"assistant","content":"OK"}}]}`)
+	}))
+	t.Cleanup(upstream.Close)
+
+	service := NewAppService(nil, NewAppStateStore(""), nil, model.ServerConfig{})
+	cfg := service.GetConfig()
+	cfg.Chat.Provider = "openai-compatible"
+	cfg.Chat.BaseURL = "http://127.0.0.1:19000/v1"
+	cfg.Chat.APIKey = "chat-secret"
+	if _, err := service.UpdateConfig(model.ConfigUpdateRequest(cfg)); err != nil {
+		t.Fatalf("update config with chat secret: %v", err)
+	}
+
+	public := service.GetPublicConfig()
+	public.Chat.BaseURL = upstream.URL
+	if _, err := service.UpdateConfig(model.ConfigUpdateRequest(public)); err != nil {
+		t.Fatalf("update config after chat endpoint change: %v", err)
+	}
+
+	if got := service.GetConfig().Chat.APIKey; got != "" {
+		t.Fatalf("expected chat secret to be cleared for a new endpoint, got %q", got)
+	}
+
+	response, err := NewLLMService().Chat(model.ChatCompletionRequest{
+		Messages: []model.ChatMessage{{Role: "user", Content: "hello"}},
+		Config:   service.CurrentChatConfig(),
+	})
+	if err != nil || len(response.Choices) != 1 {
+		t.Fatalf("expected chat request against the new endpoint to succeed, response=%#v err=%v", response, err)
+	}
+	if authorization != "" {
+		t.Fatalf("expected old chat secret not to reach the new endpoint, got authorization %q", authorization)
+	}
+}
+
+func TestUpdateConfigDoesNotCarryEmbeddingSecretAcrossEndpointChange(t *testing.T) {
+	var authorization string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = r.Header.Get("Authorization")
+		if r.URL.Path != "/v1/embeddings" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = io.WriteString(w, `{"data":[{"index":0,"embedding":[0.1,0.2,0.3]}]}`)
+	}))
+	t.Cleanup(upstream.Close)
+
+	service := NewAppService(nil, NewAppStateStore(""), nil, model.ServerConfig{})
+	cfg := service.GetConfig()
+	cfg.Embedding.Provider = "openai-compatible"
+	cfg.Embedding.BaseURL = "http://127.0.0.1:19000/v1"
+	cfg.Embedding.APIKey = "embedding-secret"
+	if _, err := service.UpdateConfig(model.ConfigUpdateRequest(cfg)); err != nil {
+		t.Fatalf("update config with embedding secret: %v", err)
+	}
+
+	public := service.GetPublicConfig()
+	public.Embedding.BaseURL = upstream.URL
+	if _, err := service.UpdateConfig(model.ConfigUpdateRequest(public)); err != nil {
+		t.Fatalf("update config after embedding endpoint change: %v", err)
+	}
+
+	if got := service.GetConfig().Embedding.APIKey; got != "" {
+		t.Fatalf("expected embedding secret to be cleared for a new endpoint, got %q", got)
+	}
+
+	config := service.CurrentEmbeddingConfig()
+	probe, err := (&ModelService{client: upstream.Client()}).Probe(t.Context(), model.ModelProbeRequest{
+		Type:     model.ModelKindEmbedding,
+		Provider: config.Provider,
+		BaseURL:  config.BaseURL,
+		Model:    config.Model,
+		APIKey:   config.APIKey,
+	}, 3)
+	if err != nil || !probe.Success {
+		t.Fatalf("expected embedding probe against the new endpoint to succeed, probe=%#v err=%v", probe, err)
+	}
+	if authorization != "" {
+		t.Fatalf("expected old embedding secret not to reach the new endpoint, got authorization %q", authorization)
 	}
 }
 

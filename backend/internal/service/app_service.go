@@ -4015,11 +4015,6 @@ func (s *AppService) UpdateConfig(req model.ConfigUpdateRequest) (model.AppConfi
 	chatBaseURL := strings.TrimSpace(req.Chat.BaseURL)
 	chatModel := strings.TrimSpace(req.Chat.Model)
 	chatAPIKey := strings.TrimSpace(req.Chat.APIKey)
-	if req.Chat.ClearAPIKey {
-		chatAPIKey = ""
-	} else if chatAPIKey == "" && req.Chat.APIKeyConfigured {
-		chatAPIKey = strings.TrimSpace(previousConfig.Chat.APIKey)
-	}
 
 	if chatProvider == "" || chatModel == "" {
 		return model.AppConfig{}, fmt.Errorf("chat provider and model are required")
@@ -4036,8 +4031,18 @@ func (s *AppService) UpdateConfig(req model.ConfigUpdateRequest) (model.AppConfi
 	if err != nil {
 		return model.AppConfig{}, fmt.Errorf("invalid chat model endpoint")
 	}
-	if req.Chat.Temperature < 0 || req.Chat.Temperature > 2 {
-		return model.AppConfig{}, fmt.Errorf("chat temperature must be between 0 and 2")
+	if err := validateModelTemperature(req.Chat.Temperature); err != nil {
+		return model.AppConfig{}, err
+	}
+	if req.Chat.ClearAPIKey {
+		chatAPIKey = ""
+	} else if chatAPIKey == "" && req.Chat.APIKeyConfigured && sameModelEndpoint(
+		chatProvider,
+		chatBaseURL,
+		previousConfig.Chat.Provider,
+		previousConfig.Chat.BaseURL,
+	) {
+		chatAPIKey = strings.TrimSpace(previousConfig.Chat.APIKey)
 	}
 	knowledgeTemperature := req.Chat.KnowledgeTemperature
 	if knowledgeTemperature == 0 {
@@ -4051,11 +4056,6 @@ func (s *AppService) UpdateConfig(req model.ConfigUpdateRequest) (model.AppConfi
 	embedBaseURL := strings.TrimSpace(req.Embedding.BaseURL)
 	embedModel := strings.TrimSpace(req.Embedding.Model)
 	embedAPIKey := strings.TrimSpace(req.Embedding.APIKey)
-	if req.Embedding.ClearAPIKey {
-		embedAPIKey = ""
-	} else if embedAPIKey == "" && req.Embedding.APIKeyConfigured {
-		embedAPIKey = strings.TrimSpace(previousConfig.Embedding.APIKey)
-	}
 
 	if embedProvider == "" || embedModel == "" {
 		return model.AppConfig{}, fmt.Errorf("embedding provider and model are required")
@@ -4070,6 +4070,16 @@ func (s *AppService) UpdateConfig(req model.ConfigUpdateRequest) (model.AppConfi
 	embedProvider, embedBaseURL, err = normalizeModelEndpoint(embedProvider, embedBaseURL)
 	if err != nil {
 		return model.AppConfig{}, fmt.Errorf("invalid embedding model endpoint")
+	}
+	if req.Embedding.ClearAPIKey {
+		embedAPIKey = ""
+	} else if embedAPIKey == "" && req.Embedding.APIKeyConfigured && sameModelEndpoint(
+		embedProvider,
+		embedBaseURL,
+		previousConfig.Embedding.Provider,
+		previousConfig.Embedding.BaseURL,
+	) {
+		embedAPIKey = strings.TrimSpace(previousConfig.Embedding.APIKey)
 	}
 
 	contextMessageLimit := req.Chat.ContextMessageLimit

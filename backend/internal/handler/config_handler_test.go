@@ -284,7 +284,7 @@ func TestProbeModelHonorsExplicitAPIKeyClear(t *testing.T) {
 	handler := NewConfigHandler(appService, nil)
 	configured := true
 	recorder := invokeConfigHandler(t, http.MethodPost, "/api/config/models/probe", model.ModelProbeRequest{
-		Type: model.ModelKindEmbedding, Provider: "openai", BaseURL: upstream.URL, Model: "embed-model",
+		Type: model.ModelKindEmbedding, Provider: "openai", BaseURL: upstream.URL, Model: "embed-model", APIKey: "draft-key",
 		APIKeyConfigured: &configured, ClearAPIKey: true,
 	}, handler.ProbeModel)
 	if recorder.Code != http.StatusOK {
@@ -300,11 +300,138 @@ func TestProbeModelHonorsExplicitAPIKeyClear(t *testing.T) {
 	}
 }
 
+func TestLegacyChatModelProbeHonorsExplicitAPIKeyClear(t *testing.T) {
+	var upstreamAuthorization string
+	var requestSeen bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestSeen = true
+		upstreamAuthorization = r.Header.Get("Authorization")
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"model":"chat-model","choices":[{"message":{"role":"assistant","content":"OK"}}]}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	appService := service.NewAppService(nil, nil, nil, model.ServerConfig{})
+	setModelConfigs(t, appService,
+		model.ChatConfig{Provider: "openai-compatible", BaseURL: upstream.URL + "/v1", Model: "chat-model", APIKey: "stored-key"},
+		model.EmbeddingConfig{Provider: "ollama", BaseURL: "http://127.0.0.1:11434", Model: "embedding-model"},
+	)
+	handler := NewConfigHandler(appService, nil)
+	recorder := invokeConfigHandler(t, http.MethodPost, "/api/config/test-chat-model", map[string]any{
+		"provider":         "openai",
+		"baseUrl":          upstream.URL,
+		"model":            "chat-model",
+		"apiKey":           "draft-key",
+		"apiKeyConfigured": true,
+		"clearApiKey":      true,
+		"temperature":      0,
+	}, handler.TestChatModel)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected legacy chat probe response, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response TestModelResponse
+	decodeJSONResponse(t, recorder.Body.Bytes(), &response)
+	if !requestSeen || !response.Success {
+		t.Fatalf("expected legacy chat probe to reach and succeed at upstream, seen=%v response=%#v", requestSeen, response)
+	}
+	if upstreamAuthorization != "" {
+		t.Fatalf("expected legacy chat clear intent not to send a key, got authorization %q", upstreamAuthorization)
+	}
+}
+
+func TestLegacyEmbeddingModelProbeHonorsExplicitAPIKeyClear(t *testing.T) {
+	var upstreamAuthorization string
+	var requestSeen bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestSeen = true
+		upstreamAuthorization = r.Header.Get("Authorization")
+		if r.URL.Path != "/v1/embeddings" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"index":0,"embedding":[0.1,0.2,0.3,0.4]}]}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	appService := service.NewAppService(nil, nil, nil, model.ServerConfig{QdrantVectorSize: 4})
+	setModelConfigs(t, appService,
+		model.ChatConfig{Provider: "ollama", BaseURL: "http://127.0.0.1:11434", Model: "chat-model"},
+		model.EmbeddingConfig{Provider: "openai-compatible", BaseURL: upstream.URL + "/v1", Model: "embedding-model", APIKey: "stored-key"},
+	)
+	handler := NewConfigHandler(appService, nil)
+	recorder := invokeConfigHandler(t, http.MethodPost, "/api/config/test-embedding-model", map[string]any{
+		"provider":         "openai",
+		"baseUrl":          upstream.URL,
+		"model":            "embedding-model",
+		"apiKey":           "draft-key",
+		"apiKeyConfigured": true,
+		"clearApiKey":      true,
+	}, handler.TestEmbeddingModel)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected legacy embedding probe response, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response TestModelResponse
+	decodeJSONResponse(t, recorder.Body.Bytes(), &response)
+	if !requestSeen || !response.Success {
+		t.Fatalf("expected legacy embedding probe to reach and succeed at upstream, seen=%v response=%#v", requestSeen, response)
+	}
+	if upstreamAuthorization != "" {
+		t.Fatalf("expected legacy embedding clear intent not to send a key, got authorization %q", upstreamAuthorization)
+	}
+}
+
+func TestProbeChatResponseOmitsEmbeddingDimensionFields(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/chat" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"chat-model","message":{"role":"assistant","content":"OK"}}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	handler := NewConfigHandler(service.NewAppService(nil, nil, nil, model.ServerConfig{QdrantVectorSize: 768}), nil)
+	recorder := invokeConfigHandler(t, http.MethodPost, "/api/config/models/probe", model.ModelProbeRequest{
+		Type: model.ModelKindChat, Provider: "ollama", BaseURL: upstream.URL, Model: "chat-model", Temperature: 0,
+	}, handler.ProbeModel)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response map[string]any
+	decodeJSONResponse(t, recorder.Body.Bytes(), &response)
+	if success, ok := response["success"].(bool); !ok || !success {
+		t.Fatalf("expected successful chat probe, got %#v", response)
+	}
+	for _, key := range []string{"vector_size", "expected_vector_size", "dimension_match"} {
+		if _, ok := response[key]; ok {
+			t.Fatalf("did not expect chat probe field %q in %#v", key, response)
+		}
+	}
+}
+
 func TestProbeSaveAndRuntimeChatUseCanonicalOpenAIEndpoint(t *testing.T) {
+	var runtimeTemperature float64
+	var runtimeRequestSeen bool
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
 			http.NotFound(w, r)
 			return
+		}
+		var payload struct {
+			Messages    []model.ChatMessage `json:"messages"`
+			Temperature float64             `json:"temperature"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "invalid chat payload", http.StatusBadRequest)
+			return
+		}
+		if len(payload.Messages) == 1 && payload.Messages[0].Content == "hello" {
+			runtimeRequestSeen = true
+			runtimeTemperature = payload.Temperature
 		}
 		_, _ = w.Write([]byte(`{"model":"chat-model","choices":[{"message":{"role":"assistant","content":"OK"}}]}`))
 	}))
@@ -325,7 +452,7 @@ func TestProbeSaveAndRuntimeChatUseCanonicalOpenAIEndpoint(t *testing.T) {
 	}
 
 	if _, err := appService.UpdateConfig(model.ConfigUpdateRequest{
-		Chat:      model.ChatConfig{Provider: "openai", BaseURL: upstream.URL, Model: "chat-model"},
+		Chat:      model.ChatConfig{Provider: "openai", BaseURL: upstream.URL, Model: "chat-model", Temperature: 0},
 		Embedding: model.EmbeddingConfig{Provider: "ollama", BaseURL: "http://127.0.0.1:11434", Model: "embedding-model"},
 	}); err != nil {
 		t.Fatalf("save config: %v", err)
@@ -334,6 +461,9 @@ func TestProbeSaveAndRuntimeChatUseCanonicalOpenAIEndpoint(t *testing.T) {
 	if chatConfig.Provider != "openai-compatible" || chatConfig.BaseURL != upstream.URL+"/v1" {
 		t.Fatalf("expected canonical saved chat config, got %#v", chatConfig)
 	}
+	if chatConfig.Temperature != 0 {
+		t.Fatalf("expected saved chat temperature 0, got %v", chatConfig.Temperature)
+	}
 
 	response, err := service.NewLLMService().Chat(model.ChatCompletionRequest{
 		Messages: []model.ChatMessage{{Role: "user", Content: "hello"}},
@@ -341,6 +471,9 @@ func TestProbeSaveAndRuntimeChatUseCanonicalOpenAIEndpoint(t *testing.T) {
 	})
 	if err != nil || len(response.Choices) != 1 || response.Choices[0].Message.Content != "OK" {
 		t.Fatalf("expected saved config to drive runtime chat, response=%#v err=%v", response, err)
+	}
+	if !runtimeRequestSeen || runtimeTemperature != 0 {
+		t.Fatalf("expected runtime chat request temperature 0, seen=%v temperature=%v", runtimeRequestSeen, runtimeTemperature)
 	}
 }
 

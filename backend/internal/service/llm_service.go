@@ -646,8 +646,8 @@ func normalizeChatConfig(req model.ChatCompletionRequest) (model.ChatModelConfig
 	}
 	cfg.Provider = normalizedProvider
 	cfg.BaseURL = normalizedBaseURL
-	if cfg.Temperature <= 0 {
-		cfg.Temperature = 0.7
+	if err := validateModelTemperature(cfg.Temperature); err != nil {
+		return model.ChatModelConfig{}, err
 	}
 	return cfg, nil
 }

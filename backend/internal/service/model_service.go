@@ -212,15 +212,22 @@ func (s *ModelService) Probe(parent context.Context, request model.ModelProbeReq
 	if requestedModel == "" {
 		return model.ModelProbeResponse{}, fmt.Errorf("model name is required")
 	}
+	if normalizedType == model.ModelKindChat {
+		if err := validateModelTemperature(request.Temperature); err != nil {
+			return model.ModelProbeResponse{}, err
+		}
+	}
 	if parent == nil {
 		parent = context.Background()
 	}
 
 	result := model.ModelProbeResponse{
-		Type:               normalizedType,
-		Provider:           normalizedProvider,
-		Model:              requestedModel,
-		ExpectedVectorSize: expectedVectorSize,
+		Type:     normalizedType,
+		Provider: normalizedProvider,
+		Model:    requestedModel,
+	}
+	if normalizedType == model.ModelKindEmbedding {
+		result.ExpectedVectorSize = expectedVectorSize
 	}
 	ctx, cancel := context.WithTimeout(parent, modelProbeTimeout)
 	defer cancel()
@@ -367,6 +374,13 @@ func (s *ModelService) probeOpenAIEmbedding(ctx context.Context, baseURL, modelN
 		}
 	}
 	return len(response.Data[0].Embedding), nil
+}
+
+func validateModelTemperature(value float64) error {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 2 {
+		return fmt.Errorf("chat temperature must be between 0 and 2")
+	}
+	return nil
 }
 
 func (s *ModelService) doProbeJSON(ctx context.Context, endpoint string, payload any, apiKey string, destination any) error {

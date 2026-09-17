@@ -30,19 +30,23 @@ func NewConfigHandler(appService *service.AppService, qdrantService *service.Qdr
 
 // TestChatModelRequest 测试聊天模型请求
 type TestChatModelRequest struct {
-	Provider    string  `json:"provider" binding:"required"`
-	BaseURL     string  `json:"baseUrl" binding:"required"`
-	Model       string  `json:"model" binding:"required"`
-	APIKey      string  `json:"apiKey"`
-	Temperature float64 `json:"temperature"`
+	Provider         string  `json:"provider" binding:"required"`
+	BaseURL          string  `json:"baseUrl" binding:"required"`
+	Model            string  `json:"model" binding:"required"`
+	APIKey           string  `json:"apiKey"`
+	APIKeyConfigured *bool   `json:"apiKeyConfigured,omitempty"`
+	ClearAPIKey      bool    `json:"clearApiKey,omitempty"`
+	Temperature      float64 `json:"temperature"`
 }
 
 // TestEmbeddingModelRequest 测试嵌入模型请求
 type TestEmbeddingModelRequest struct {
-	Provider string `json:"provider" binding:"required"`
-	BaseURL  string `json:"baseUrl" binding:"required"`
-	Model    string `json:"model" binding:"required"`
-	APIKey   string `json:"apiKey"`
+	Provider         string `json:"provider" binding:"required"`
+	BaseURL          string `json:"baseUrl" binding:"required"`
+	Model            string `json:"model" binding:"required"`
+	APIKey           string `json:"apiKey"`
+	APIKeyConfigured *bool  `json:"apiKeyConfigured,omitempty"`
+	ClearAPIKey      bool   `json:"clearApiKey,omitempty"`
 }
 
 // TestModelResponse 测试响应
@@ -123,7 +127,7 @@ func (h *ConfigHandler) TestChatModel(c *gin.Context) {
 		Provider:    req.Provider,
 		BaseURL:     req.BaseURL,
 		Model:       req.Model,
-		APIKey:      h.resolveModelAPIKey(req.APIKey, model.ModelKindChat, req.Provider, req.BaseURL, nil, false),
+		APIKey:      h.resolveModelAPIKey(req.APIKey, model.ModelKindChat, req.Provider, req.BaseURL, req.APIKeyConfigured, req.ClearAPIKey),
 		Temperature: req.Temperature,
 	}, h.expectedEmbeddingVectorSize())
 	if err != nil {
@@ -146,7 +150,7 @@ func (h *ConfigHandler) TestEmbeddingModel(c *gin.Context) {
 		Provider: req.Provider,
 		BaseURL:  req.BaseURL,
 		Model:    req.Model,
-		APIKey:   h.resolveModelAPIKey(req.APIKey, model.ModelKindEmbedding, req.Provider, req.BaseURL, nil, false),
+		APIKey:   h.resolveModelAPIKey(req.APIKey, model.ModelKindEmbedding, req.Provider, req.BaseURL, req.APIKeyConfigured, req.ClearAPIKey),
 	}, h.expectedEmbeddingVectorSize())
 	if err != nil {
 		c.JSON(http.StatusOK, TestModelResponse{Success: false, ErrorMessage: formatErrorMessage(err)})
@@ -175,10 +179,13 @@ func testModelResponseFromProbe(probe model.ModelProbeResponse) TestModelRespons
 }
 
 func (h *ConfigHandler) resolveModelAPIKey(candidate string, kind model.ModelKind, provider, baseURL string, apiKeyConfigured *bool, clearAPIKey bool) string {
+	if clearAPIKey {
+		return ""
+	}
 	if candidate != "" {
 		return candidate
 	}
-	if clearAPIKey || (apiKeyConfigured != nil && !*apiKeyConfigured) {
+	if apiKeyConfigured != nil && !*apiKeyConfigured {
 		return ""
 	}
 	if h == nil || h.appService == nil {

@@ -54,7 +54,7 @@ type ModelProbeResponse struct {
 	LatencyMs          int64     `json:"latency_ms"`
 	VectorSize         int       `json:"vector_size,omitempty"`
 	ExpectedVectorSize int       `json:"expected_vector_size,omitempty"`
-	DimensionMatch     *bool     `json:"dimension_match"`
+	DimensionMatch     *bool     `json:"dimension_match,omitempty"`
 	ModelInfo          string    `json:"model_info"`
 	ErrorCode          string    `json:"error_code"`
 	ErrorMessage       string    `json:"error_message"`

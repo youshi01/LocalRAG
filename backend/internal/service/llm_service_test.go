@@ -139,6 +139,38 @@ func TestChatNormalizesOpenAICompatibleRootURL(t *testing.T) {
 	}
 }
 
+func TestChatPreservesConfiguredZeroTemperature(t *testing.T) {
+	var receivedTemperature float64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("expected canonical OpenAI path, got %s", r.URL.Path)
+		}
+		var payload openAIChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode chat payload: %v", err)
+		}
+		receivedTemperature = payload.Temperature
+		_, _ = w.Write([]byte(`{"model":"test-model","choices":[{"message":{"role":"assistant","content":"OK"}}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	response, err := NewLLMService().Chat(model.ChatCompletionRequest{
+		Messages: []model.ChatMessage{{Role: "user", Content: "hello"}},
+		Config: model.ChatModelConfig{
+			Provider:    "openai-compatible",
+			BaseURL:     server.URL,
+			Model:       "test-model",
+			Temperature: 0,
+		},
+	})
+	if err != nil || len(response.Choices) != 1 {
+		t.Fatalf("expected zero-temperature chat to succeed, response=%#v err=%v", response, err)
+	}
+	if receivedTemperature != 0 {
+		t.Fatalf("expected runtime temperature 0, got %v", receivedTemperature)
+	}
+}
+
 func TestStreamChatReturnsModelErrorWithoutFallbackChunk(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":{"message":"stream unavailable"}}`, http.StatusServiceUnavailable)

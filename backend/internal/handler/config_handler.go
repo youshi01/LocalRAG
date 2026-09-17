@@ -17,12 +17,14 @@ import (
 type ConfigHandler struct {
 	appService    *service.AppService
 	qdrantService *service.QdrantService
+	modelService  *service.ModelService
 }
 
 func NewConfigHandler(appService *service.AppService, qdrantService *service.QdrantService) *ConfigHandler {
 	return &ConfigHandler{
 		appService:    appService,
 		qdrantService: qdrantService,
+		modelService:  service.NewModelService(),
 	}
 }
 
@@ -74,6 +76,40 @@ type ComponentHealth struct {
 	ErrorMessage string `json:"error_message,omitempty"`
 }
 
+// ListModels returns the models advertised by the requested provider.
+func (h *ConfigHandler) ListModels(c *gin.Context) {
+	var req model.ModelListRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeError(c, http.StatusBadRequest, "Invalid model request")
+		return
+	}
+
+	req.APIKey = h.resolveModelAPIKey(req.APIKey, req.Type, req.Provider, req.BaseURL)
+	response, err := h.modelService.ListModels(c.Request.Context(), req)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "Invalid model request")
+		return
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+// ProbeModel probes one chat or embedding model with a safe response contract.
+func (h *ConfigHandler) ProbeModel(c *gin.Context) {
+	var req model.ModelProbeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeError(c, http.StatusBadRequest, "Invalid model request")
+		return
+	}
+
+	req.APIKey = h.resolveModelAPIKey(req.APIKey, req.Type, req.Provider, req.BaseURL)
+	response, err := h.modelService.Probe(c.Request.Context(), req, h.expectedEmbeddingVectorSize())
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "Invalid model request")
+		return
+	}
+	c.JSON(http.StatusOK, response)
+}
+
 // TestChatModel 测试聊天模型连通性
 func (h *ConfigHandler) TestChatModel(c *gin.Context) {
 	var req TestChatModelRequest
@@ -82,54 +118,19 @@ func (h *ConfigHandler) TestChatModel(c *gin.Context) {
 		return
 	}
 
-	start := time.Now()
-
-	// 创建临时 LLM 服务实例
-	llmService := service.NewLLMService()
-
-	// 构造测试消息
-	testMessages := []model.ChatMessage{
-		{Role: "user", Content: "Hello"},
-	}
-
-	// 调用聊天接口
-	apiKey := h.resolveChatAPIKey(req.APIKey, req.Provider, req.BaseURL)
-	response, err := llmService.Chat(model.ChatCompletionRequest{
-		Messages: testMessages,
-		Config: model.ChatModelConfig{
-			Provider:    req.Provider,
-			BaseURL:     req.BaseURL,
-			Model:       req.Model,
-			APIKey:      apiKey,
-			Temperature: req.Temperature,
-		},
-	})
-	latency := time.Since(start).Milliseconds()
-
+	probe, err := h.modelService.Probe(c.Request.Context(), model.ModelProbeRequest{
+		Type:        model.ModelKindChat,
+		Provider:    req.Provider,
+		BaseURL:     req.BaseURL,
+		Model:       req.Model,
+		APIKey:      h.resolveModelAPIKey(req.APIKey, model.ModelKindChat, req.Provider, req.BaseURL),
+		Temperature: req.Temperature,
+	}, h.expectedEmbeddingVectorSize())
 	if err != nil {
-		c.JSON(http.StatusOK, TestModelResponse{
-			Success:      false,
-			LatencyMs:    latency,
-			ErrorMessage: formatErrorMessage(err),
-		})
+		c.JSON(http.StatusOK, TestModelResponse{Success: false, ErrorMessage: formatErrorMessage(err)})
 		return
 	}
-
-	// 检查响应是否有效
-	if len(response.Choices) == 0 || response.Choices[0].Message.Content == "" {
-		c.JSON(http.StatusOK, TestModelResponse{
-			Success:      false,
-			LatencyMs:    latency,
-			ErrorMessage: "Model returned empty response",
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, TestModelResponse{
-		Success:   true,
-		LatencyMs: latency,
-		ModelInfo: fmt.Sprintf("Model responded successfully (response length: %d chars)", len(response.Choices[0].Message.Content)),
-	})
+	c.JSON(http.StatusOK, testModelResponseFromProbe(probe))
 }
 
 // TestEmbeddingModel 测试嵌入模型连通性
@@ -140,92 +141,67 @@ func (h *ConfigHandler) TestEmbeddingModel(c *gin.Context) {
 		return
 	}
 
-	start := time.Now()
-
-	// 创建临时 RAG 服务实例
-	ragService := service.NewRagService()
-
-	// 测试文本
-	testText := "Hello, this is a test."
-
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
-	defer cancel()
-
-	// 调用嵌入接口
-	apiKey := h.resolveEmbeddingAPIKey(req.APIKey, req.Provider, req.BaseURL)
-	vectors, err := ragService.EmbedTexts(ctx, model.EmbeddingModelConfig{
+	probe, err := h.modelService.Probe(c.Request.Context(), model.ModelProbeRequest{
+		Type:     model.ModelKindEmbedding,
 		Provider: req.Provider,
 		BaseURL:  req.BaseURL,
 		Model:    req.Model,
-		APIKey:   apiKey,
-	}, []string{testText}, h.expectedEmbeddingVectorSize())
-
-	latency := time.Since(start).Milliseconds()
-
+		APIKey:   h.resolveModelAPIKey(req.APIKey, model.ModelKindEmbedding, req.Provider, req.BaseURL),
+	}, h.expectedEmbeddingVectorSize())
 	if err != nil {
-		actualSize, expectedSize := embeddingDimensionDetails(err)
-		c.JSON(http.StatusOK, TestModelResponse{
-			Success:            false,
-			LatencyMs:          latency,
-			ErrorMessage:       formatErrorMessage(err),
-			VectorSize:         actualSize,
-			ExpectedVectorSize: expectedSize,
-		})
+		c.JSON(http.StatusOK, TestModelResponse{Success: false, ErrorMessage: formatErrorMessage(err)})
 		return
 	}
-
-	// 检查向量是否有效
-	if len(vectors) == 0 || len(vectors[0]) == 0 {
-		c.JSON(http.StatusOK, TestModelResponse{
-			Success:      false,
-			LatencyMs:    latency,
-			ErrorMessage: "Model returned empty vector",
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, TestModelResponse{
-		Success:            true,
-		LatencyMs:          latency,
-		VectorSize:         len(vectors[0]),
-		ExpectedVectorSize: h.expectedEmbeddingVectorSize(),
-		ModelInfo:          fmt.Sprintf("Embedding successful (vector size: %d)", len(vectors[0])),
-	})
+	c.JSON(http.StatusOK, testModelResponseFromProbe(probe))
 }
 
-func (h *ConfigHandler) resolveChatAPIKey(candidate, provider, baseURL string) string {
-	candidate = strings.TrimSpace(candidate)
+func testModelResponseFromProbe(probe model.ModelProbeResponse) TestModelResponse {
+	modelInfo := probe.ModelInfo
+	if probe.Success && modelInfo == "" {
+		if probe.Type == model.ModelKindEmbedding {
+			modelInfo = fmt.Sprintf("Embedding successful (vector size: %d)", probe.VectorSize)
+		} else {
+			modelInfo = "Model responded successfully"
+		}
+	}
+	return TestModelResponse{
+		Success:            probe.Success,
+		LatencyMs:          probe.LatencyMs,
+		ErrorMessage:       probe.ErrorMessage,
+		VectorSize:         probe.VectorSize,
+		ExpectedVectorSize: probe.ExpectedVectorSize,
+		ModelInfo:          modelInfo,
+	}
+}
+
+func (h *ConfigHandler) resolveModelAPIKey(candidate string, kind model.ModelKind, provider, baseURL string) string {
 	if candidate != "" {
 		return candidate
 	}
 	if h == nil || h.appService == nil {
 		return ""
 	}
-	config := h.appService.GetConfig()
-	if !sameModelEndpoint(provider, baseURL, config.Chat.Provider, config.Chat.BaseURL) {
-		return ""
-	}
-	return strings.TrimSpace(config.Chat.APIKey)
-}
 
-func (h *ConfigHandler) resolveEmbeddingAPIKey(candidate, provider, baseURL string) string {
-	candidate = strings.TrimSpace(candidate)
-	if candidate != "" {
-		return candidate
-	}
-	if h == nil || h.appService == nil {
+	normalizedProvider, normalizedBaseURL, err := service.NormalizeModelEndpoint(provider, baseURL)
+	if err != nil {
 		return ""
 	}
 	config := h.appService.GetConfig()
-	if !sameModelEndpoint(provider, baseURL, config.Embedding.Provider, config.Embedding.BaseURL) {
+	var storedProvider, storedBaseURL, storedAPIKey string
+	switch kind {
+	case model.ModelKindChat:
+		storedProvider, storedBaseURL, storedAPIKey = config.Chat.Provider, config.Chat.BaseURL, config.Chat.APIKey
+	case model.ModelKindEmbedding:
+		storedProvider, storedBaseURL, storedAPIKey = config.Embedding.Provider, config.Embedding.BaseURL, config.Embedding.APIKey
+	default:
 		return ""
 	}
-	return strings.TrimSpace(config.Embedding.APIKey)
-}
 
-func sameModelEndpoint(provider, baseURL, storedProvider, storedBaseURL string) bool {
-	return strings.EqualFold(strings.TrimSpace(provider), strings.TrimSpace(storedProvider)) &&
-		strings.TrimRight(strings.TrimSpace(baseURL), "/") == strings.TrimRight(strings.TrimSpace(storedBaseURL), "/")
+	storedNormalizedProvider, storedNormalizedBaseURL, err := service.NormalizeModelEndpoint(storedProvider, storedBaseURL)
+	if err != nil || normalizedProvider != storedNormalizedProvider || normalizedBaseURL != storedNormalizedBaseURL {
+		return ""
+	}
+	return storedAPIKey
 }
 
 func (h *ConfigHandler) expectedEmbeddingVectorSize() int {
@@ -359,45 +335,29 @@ func (h *ConfigHandler) checkChatModelHealth(ctx context.Context) ComponentHealt
 		}
 	}
 
-	start := time.Now()
-	llmService := service.NewLLMService()
-
-	testMessages := []model.ChatMessage{
-		{Role: "user", Content: "Hi"},
-	}
-
-	response, err := llmService.Chat(model.ChatCompletionRequest{
-		Messages: testMessages,
-		Config: model.ChatModelConfig{
-			Provider:    config.Chat.Provider,
-			BaseURL:     config.Chat.BaseURL,
-			Model:       config.Chat.Model,
-			APIKey:      config.Chat.APIKey,
-			Temperature: config.Chat.Temperature,
-		},
-	})
-	latency := time.Since(start).Milliseconds()
-
+	probe, err := h.modelService.Probe(ctx, model.ModelProbeRequest{
+		Type:        model.ModelKindChat,
+		Provider:    config.Chat.Provider,
+		BaseURL:     config.Chat.BaseURL,
+		Model:       config.Chat.Model,
+		APIKey:      h.resolveModelAPIKey(config.Chat.APIKey, model.ModelKindChat, config.Chat.Provider, config.Chat.BaseURL),
+		Temperature: config.Chat.Temperature,
+	}, h.expectedEmbeddingVectorSize())
 	if err != nil {
-		return ComponentHealth{
-			Status:       "error",
-			ErrorMessage: formatErrorMessage(err),
-			LatencyMs:    latency,
-		}
+		return ComponentHealth{Status: "error", ErrorMessage: formatErrorMessage(err)}
 	}
-
-	if len(response.Choices) == 0 || response.Choices[0].Message.Content == "" {
+	if !probe.Success {
 		return ComponentHealth{
 			Status:       "error",
-			ErrorMessage: "Model returned empty response",
-			LatencyMs:    latency,
+			ErrorMessage: probe.ErrorMessage,
+			LatencyMs:    probe.LatencyMs,
 		}
 	}
 
 	return ComponentHealth{
 		Status:    "ok",
 		Message:   fmt.Sprintf("Chat model '%s' is working", config.Chat.Model),
-		LatencyMs: latency,
+		LatencyMs: probe.LatencyMs,
 	}
 }
 
@@ -411,37 +371,28 @@ func (h *ConfigHandler) checkEmbeddingModelHealth(ctx context.Context) Component
 		}
 	}
 
-	start := time.Now()
-	ragService := service.NewRagService()
-
-	vectors, err := ragService.EmbedTexts(ctx, model.EmbeddingModelConfig{
+	probe, err := h.modelService.Probe(ctx, model.ModelProbeRequest{
+		Type:     model.ModelKindEmbedding,
 		Provider: config.Embedding.Provider,
 		BaseURL:  config.Embedding.BaseURL,
 		Model:    config.Embedding.Model,
-		APIKey:   config.Embedding.APIKey,
-	}, []string{"test"}, h.expectedEmbeddingVectorSize())
-	latency := time.Since(start).Milliseconds()
-
+		APIKey:   h.resolveModelAPIKey(config.Embedding.APIKey, model.ModelKindEmbedding, config.Embedding.Provider, config.Embedding.BaseURL),
+	}, h.expectedEmbeddingVectorSize())
 	if err != nil {
-		return ComponentHealth{
-			Status:       "error",
-			ErrorMessage: formatErrorMessage(err),
-			LatencyMs:    latency,
-		}
+		return ComponentHealth{Status: "error", ErrorMessage: formatErrorMessage(err)}
 	}
-
-	if len(vectors) == 0 || len(vectors[0]) == 0 {
+	if !probe.Success {
 		return ComponentHealth{
 			Status:       "error",
-			ErrorMessage: "Model returned empty vector",
-			LatencyMs:    latency,
+			ErrorMessage: probe.ErrorMessage,
+			LatencyMs:    probe.LatencyMs,
 		}
 	}
 
 	return ComponentHealth{
 		Status:    "ok",
-		Message:   fmt.Sprintf("Embedding model '%s' is working (vector size: %d)", config.Embedding.Model, len(vectors[0])),
-		LatencyMs: latency,
+		Message:   fmt.Sprintf("Embedding model '%s' is working (vector size: %d)", config.Embedding.Model, probe.VectorSize),
+		LatencyMs: probe.LatencyMs,
 	}
 }
 

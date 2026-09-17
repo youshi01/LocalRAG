@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"localrag/internal/model"
 	"localrag/internal/service"
-	"github.com/gin-gonic/gin"
 )
 
 func TestExpectedEmbeddingVectorSizeUsesServerConfig(t *testing.T) {
@@ -25,6 +25,17 @@ func TestExpectedEmbeddingVectorSizeUsesServerConfig(t *testing.T) {
 
 func TestEmbeddingModelResponseIncludesConfiguredVectorSize(t *testing.T) {
 	embeddingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/embed" {
+			http.NotFound(w, r)
+			return
+		}
+		var probe struct {
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&probe); err != nil || len(probe.Input) != 1 || probe.Input[0] != "LocalRAG model health probe" {
+			http.Error(w, "expected model probe request", http.StatusBadRequest)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"embeddings":[[0.1,0.2,0.3,0.4]]}`))
 	}))
@@ -148,5 +159,183 @@ func TestReadinessReturnsUnavailableWhenStagingManifestIsCorrupt(t *testing.T) {
 	}
 	if strings.Contains(response.Checks["upload_staging"].ErrorMessage, stagingDir) {
 		t.Fatalf("readiness error must not expose staging path: %#v", response.Checks["upload_staging"])
+	}
+}
+
+func TestListModelsReturnsCandidateList(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/tags" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"models":[{"name":"llama3.2"},{"name":"qwen2.5"}]}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	handler := NewConfigHandler(service.NewAppService(nil, nil, nil, model.ServerConfig{}), nil)
+	recorder := invokeConfigHandler(t, http.MethodPost, "/api/config/models", model.ModelListRequest{
+		Type: model.ModelKindChat, Provider: "ollama", BaseURL: upstream.URL,
+	}, handler.ListModels)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response model.ModelListResponse
+	decodeJSONResponse(t, recorder.Body.Bytes(), &response)
+	if !response.Success || len(response.Models) != 2 || response.Models[0].ID != "llama3.2" || response.Models[1].ID != "qwen2.5" {
+		t.Fatalf("unexpected model list response: %#v", response)
+	}
+}
+
+func TestProbeModelReturnsEmbeddingLatencyAndVectorFields(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/embed" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"embeddings":[[0.1,0.2,0.3,0.4]]}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	handler := NewConfigHandler(service.NewAppService(nil, nil, nil, model.ServerConfig{QdrantVectorSize: 4}), nil)
+	recorder := invokeConfigHandler(t, http.MethodPost, "/api/config/models/probe", model.ModelProbeRequest{
+		Type: model.ModelKindEmbedding, Provider: "ollama", BaseURL: upstream.URL, Model: "nomic-embed-text",
+	}, handler.ProbeModel)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response model.ModelProbeResponse
+	decodeJSONResponse(t, recorder.Body.Bytes(), &response)
+	if !response.Success || response.LatencyMs < 0 || response.VectorSize != 4 || response.ExpectedVectorSize != 4 || response.DimensionMatch == nil || !*response.DimensionMatch {
+		t.Fatalf("unexpected probe response: %#v", response)
+	}
+}
+
+func TestProbeModelRejectsInvalidRequests(t *testing.T) {
+	handler := NewConfigHandler(service.NewAppService(nil, nil, nil, model.ServerConfig{}), nil)
+	for _, request := range []model.ModelProbeRequest{
+		{Type: "invalid", Provider: "ollama", BaseURL: "http://127.0.0.1", Model: "model"},
+		{Type: model.ModelKindChat, Provider: "ollama", Model: "model"},
+		{Type: model.ModelKindChat, Provider: "ollama", BaseURL: "http://127.0.0.1"},
+	} {
+		recorder := invokeConfigHandler(t, http.MethodPost, "/api/config/models/probe", request, handler.ProbeModel)
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for %#v, got %d: %s", request, recorder.Code, recorder.Body.String())
+		}
+	}
+}
+
+func TestProbeModelUsesMatchingStoredAPIKeyWithoutLeakingIt(t *testing.T) {
+	const storedKey = "stored-key-must-not-leak"
+	var upstreamAuthorization string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamAuthorization = r.Header.Get("Authorization")
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/embeddings" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message":"stored-key-must-not-leak"}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	appService := service.NewAppService(nil, nil, nil, model.ServerConfig{})
+	setModelConfigs(t, appService,
+		model.ChatConfig{Provider: "ollama", BaseURL: "http://127.0.0.1:11434", Model: "chat-model"},
+		model.EmbeddingConfig{Provider: "openai-compatible", BaseURL: upstream.URL + "/v1", Model: "embed-model", APIKey: storedKey},
+	)
+	handler := NewConfigHandler(appService, nil)
+	recorder := invokeConfigHandler(t, http.MethodPost, "/api/config/models/probe", model.ModelProbeRequest{
+		Type: model.ModelKindEmbedding, Provider: "openai", BaseURL: upstream.URL, Model: "embed-model",
+	}, handler.ProbeModel)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected safe upstream failure as 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if upstreamAuthorization != "Bearer "+storedKey {
+		t.Fatalf("expected saved key upstream, got authorization %q", upstreamAuthorization)
+	}
+	var response model.ModelProbeResponse
+	decodeJSONResponse(t, recorder.Body.Bytes(), &response)
+	if response.Success || strings.Contains(recorder.Body.String(), storedKey) || strings.Contains(response.ErrorMessage, storedKey) {
+		t.Fatalf("probe response leaked key or unexpectedly succeeded: %#v body=%s", response, recorder.Body.String())
+	}
+}
+
+func TestHealthSummaryReportsProbeSuccess(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/chat":
+			var request struct {
+				Messages []model.ChatMessage `json:"messages"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.Messages) != 1 || request.Messages[0].Content != "Please reply with OK only." {
+				http.Error(w, "expected model probe chat request", http.StatusBadRequest)
+				return
+			}
+			_, _ = w.Write([]byte(`{"model":"chat-model","message":{"content":"OK"}}`))
+		case "/api/embed":
+			var request struct {
+				Input []string `json:"input"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.Input) != 1 || request.Input[0] != "LocalRAG model health probe" {
+				http.Error(w, "expected model probe embedding request", http.StatusBadRequest)
+				return
+			}
+			_, _ = w.Write([]byte(`{"embeddings":[[0.1,0.2,0.3,0.4]]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+
+	appService := service.NewAppService(nil, nil, nil, model.ServerConfig{QdrantVectorSize: 4})
+	setModelConfigs(t, appService,
+		model.ChatConfig{Provider: "ollama", BaseURL: upstream.URL, Model: "chat-model"},
+		model.EmbeddingConfig{Provider: "ollama", BaseURL: upstream.URL, Model: "embedding-model"},
+	)
+	handler := NewConfigHandler(appService, nil)
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/config/health", nil)
+	handler.HealthSummary(context)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var summary HealthSummaryResponse
+	decodeJSONResponse(t, recorder.Body.Bytes(), &summary)
+	if summary.ChatModel.Status != "ok" || summary.ChatModel.LatencyMs < 0 || summary.EmbeddingModel.Status != "ok" || summary.EmbeddingModel.LatencyMs < 0 {
+		t.Fatalf("unexpected health summary: %#v", summary)
+	}
+}
+
+func invokeConfigHandler(t *testing.T, method, path string, payload any, handler gin.HandlerFunc) *httptest.ResponseRecorder {
+	t.Helper()
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(method, path, bytes.NewReader(body))
+	context.Request.Header.Set("Content-Type", "application/json")
+	handler(context)
+	return recorder
+}
+
+func decodeJSONResponse(t *testing.T, body []byte, destination any) {
+	t.Helper()
+	if err := json.Unmarshal(body, destination); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, body)
+	}
+}
+
+func setModelConfigs(t *testing.T, appService *service.AppService, chat model.ChatConfig, embedding model.EmbeddingConfig) {
+	t.Helper()
+	if _, err := appService.UpdateConfig(model.ConfigUpdateRequest{Chat: chat, Embedding: embedding}); err != nil {
+		t.Fatalf("configure models: %v", err)
 	}
 }

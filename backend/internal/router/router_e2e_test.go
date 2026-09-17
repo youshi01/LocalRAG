@@ -83,7 +83,7 @@ func TestRouterConfigEndpoints(t *testing.T) {
 
 	var updated model.AppConfig
 	decodeJSONResponse(t, resp.Body.Bytes(), &updated)
-	if updated.Chat.BaseURL != "http://chat.example.invalid/v1" {
+	if updated.Chat.BaseURL != "http://chat.example.invalid" {
 		t.Fatalf("expected chat baseUrl to be updated, got %s", updated.Chat.BaseURL)
 	}
 	if updated.Embedding.Model != "embed-model-a" {

@@ -126,6 +126,23 @@ func TestRagServiceEmbedTextsRejectsDimensionMismatch(t *testing.T) {
 	}
 }
 
+func TestRagServiceNormalizesOpenAICompatibleRootURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/embeddings" {
+			t.Fatalf("expected canonical OpenAI embedding path, got %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"data":[{"index":0,"embedding":[0.1,0.2,0.3]}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	embeddings, err := NewRagService().EmbedTexts(t.Context(), model.EmbeddingModelConfig{
+		Provider: "openai", BaseURL: server.URL, Model: "test-embedding",
+	}, []string{"示例"}, 3)
+	if err != nil || len(embeddings) != 1 || len(embeddings[0]) != 3 {
+		t.Fatalf("expected normalized embedding request to succeed, embeddings=%#v err=%v", embeddings, err)
+	}
+}
+
 func TestRagServiceBuildContext(t *testing.T) {
 	rag := NewRagService()
 	contextText, sources := rag.BuildContext([]RetrievedChunk{
@@ -639,7 +656,7 @@ func TestSearchDenseParsesNamedVectorQueryResponse(t *testing.T) {
 func TestMultiQueryDeduplication(t *testing.T) {
 	var calls int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/embeddings" {
+		if r.URL.Path == "/v1/embeddings" {
 			var request openAIEmbeddingRequest
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)

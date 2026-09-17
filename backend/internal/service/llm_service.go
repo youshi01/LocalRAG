@@ -625,18 +625,29 @@ func normalizeChatConfig(req model.ChatCompletionRequest) (model.ChatModelConfig
 	if strings.TrimSpace(cfg.Model) == "" {
 		return model.ChatModelConfig{}, fmt.Errorf("model is required")
 	}
+	provider := strings.TrimSpace(cfg.Provider)
+	if provider == "" {
+		provider = "ollama"
+	}
+	normalizedProvider, err := normalizeModelProvider(provider)
+	if err != nil {
+		return model.ChatModelConfig{}, err
+	}
 	if strings.TrimSpace(cfg.BaseURL) == "" {
-		if cfg.Provider == "ollama" {
+		if normalizedProvider == "ollama" {
 			cfg.BaseURL = "http://localhost:11434"
 		} else {
 			cfg.BaseURL = "http://localhost:11434/v1"
 		}
 	}
+	normalizedProvider, normalizedBaseURL, err := normalizeModelEndpoint(normalizedProvider, cfg.BaseURL)
+	if err != nil {
+		return model.ChatModelConfig{}, err
+	}
+	cfg.Provider = normalizedProvider
+	cfg.BaseURL = normalizedBaseURL
 	if cfg.Temperature <= 0 {
 		cfg.Temperature = 0.7
-	}
-	if strings.TrimSpace(cfg.Provider) == "" {
-		cfg.Provider = "ollama"
 	}
 	return cfg, nil
 }

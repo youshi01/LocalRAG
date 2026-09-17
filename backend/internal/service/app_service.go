@@ -3996,10 +3996,14 @@ func (s *AppService) hasSensitiveStructuredDocuments() bool {
 }
 
 func (s *AppService) defaultBaseURL(provider string) string {
-	if provider == "ollama" {
-		return s.serverConfig.OllamaBaseURL
+	ollamaBaseURL := strings.TrimRight(strings.TrimSpace(s.serverConfig.OllamaBaseURL), "/")
+	if ollamaBaseURL == "" {
+		ollamaBaseURL = "http://localhost:11434"
 	}
-	return s.serverConfig.OllamaBaseURL + "/v1"
+	if provider == "ollama" {
+		return ollamaBaseURL
+	}
+	return ollamaBaseURL + "/v1"
 }
 
 func (s *AppService) UpdateConfig(req model.ConfigUpdateRequest) (model.AppConfig, error) {
@@ -4020,8 +4024,17 @@ func (s *AppService) UpdateConfig(req model.ConfigUpdateRequest) (model.AppConfi
 	if chatProvider == "" || chatModel == "" {
 		return model.AppConfig{}, fmt.Errorf("chat provider and model are required")
 	}
+	var err error
+	chatProvider, err = normalizeModelProvider(chatProvider)
+	if err != nil {
+		return model.AppConfig{}, fmt.Errorf("invalid chat provider")
+	}
 	if chatBaseURL == "" {
 		chatBaseURL = s.defaultBaseURL(chatProvider)
+	}
+	chatProvider, chatBaseURL, err = normalizeModelEndpoint(chatProvider, chatBaseURL)
+	if err != nil {
+		return model.AppConfig{}, fmt.Errorf("invalid chat model endpoint")
 	}
 	if req.Chat.Temperature < 0 || req.Chat.Temperature > 2 {
 		return model.AppConfig{}, fmt.Errorf("chat temperature must be between 0 and 2")
@@ -4047,8 +4060,16 @@ func (s *AppService) UpdateConfig(req model.ConfigUpdateRequest) (model.AppConfi
 	if embedProvider == "" || embedModel == "" {
 		return model.AppConfig{}, fmt.Errorf("embedding provider and model are required")
 	}
+	embedProvider, err = normalizeModelProvider(embedProvider)
+	if err != nil {
+		return model.AppConfig{}, fmt.Errorf("invalid embedding provider")
+	}
 	if embedBaseURL == "" {
 		embedBaseURL = s.defaultBaseURL(embedProvider)
+	}
+	embedProvider, embedBaseURL, err = normalizeModelEndpoint(embedProvider, embedBaseURL)
+	if err != nil {
+		return model.AppConfig{}, fmt.Errorf("invalid embedding model endpoint")
 	}
 
 	contextMessageLimit := req.Chat.ContextMessageLimit
@@ -4877,8 +4898,15 @@ func (s *AppService) resolveChatConfig(req model.ChatCompletionRequest) model.Ch
 }
 
 func sameModelEndpoint(provider, baseURL, storedProvider, storedBaseURL string) bool {
-	return strings.EqualFold(strings.TrimSpace(provider), strings.TrimSpace(storedProvider)) &&
-		strings.TrimRight(strings.TrimSpace(baseURL), "/") == strings.TrimRight(strings.TrimSpace(storedBaseURL), "/")
+	normalizedProvider, normalizedBaseURL, err := normalizeModelEndpoint(provider, baseURL)
+	if err != nil {
+		return false
+	}
+	storedNormalizedProvider, storedNormalizedBaseURL, err := normalizeModelEndpoint(storedProvider, storedBaseURL)
+	if err != nil {
+		return false
+	}
+	return normalizedProvider == storedNormalizedProvider && normalizedBaseURL == storedNormalizedBaseURL
 }
 
 func (s *AppService) ContextMessageLimit() int {

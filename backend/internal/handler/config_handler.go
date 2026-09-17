@@ -84,7 +84,7 @@ func (h *ConfigHandler) ListModels(c *gin.Context) {
 		return
 	}
 
-	req.APIKey = h.resolveModelAPIKey(req.APIKey, req.Type, req.Provider, req.BaseURL)
+	req.APIKey = h.resolveModelAPIKey(req.APIKey, req.Type, req.Provider, req.BaseURL, req.APIKeyConfigured, req.ClearAPIKey)
 	response, err := h.modelService.ListModels(c.Request.Context(), req)
 	if err != nil {
 		writeError(c, http.StatusBadRequest, "Invalid model request")
@@ -101,7 +101,7 @@ func (h *ConfigHandler) ProbeModel(c *gin.Context) {
 		return
 	}
 
-	req.APIKey = h.resolveModelAPIKey(req.APIKey, req.Type, req.Provider, req.BaseURL)
+	req.APIKey = h.resolveModelAPIKey(req.APIKey, req.Type, req.Provider, req.BaseURL, req.APIKeyConfigured, req.ClearAPIKey)
 	response, err := h.modelService.Probe(c.Request.Context(), req, h.expectedEmbeddingVectorSize())
 	if err != nil {
 		writeError(c, http.StatusBadRequest, "Invalid model request")
@@ -123,7 +123,7 @@ func (h *ConfigHandler) TestChatModel(c *gin.Context) {
 		Provider:    req.Provider,
 		BaseURL:     req.BaseURL,
 		Model:       req.Model,
-		APIKey:      h.resolveModelAPIKey(req.APIKey, model.ModelKindChat, req.Provider, req.BaseURL),
+		APIKey:      h.resolveModelAPIKey(req.APIKey, model.ModelKindChat, req.Provider, req.BaseURL, nil, false),
 		Temperature: req.Temperature,
 	}, h.expectedEmbeddingVectorSize())
 	if err != nil {
@@ -146,7 +146,7 @@ func (h *ConfigHandler) TestEmbeddingModel(c *gin.Context) {
 		Provider: req.Provider,
 		BaseURL:  req.BaseURL,
 		Model:    req.Model,
-		APIKey:   h.resolveModelAPIKey(req.APIKey, model.ModelKindEmbedding, req.Provider, req.BaseURL),
+		APIKey:   h.resolveModelAPIKey(req.APIKey, model.ModelKindEmbedding, req.Provider, req.BaseURL, nil, false),
 	}, h.expectedEmbeddingVectorSize())
 	if err != nil {
 		c.JSON(http.StatusOK, TestModelResponse{Success: false, ErrorMessage: formatErrorMessage(err)})
@@ -174,9 +174,12 @@ func testModelResponseFromProbe(probe model.ModelProbeResponse) TestModelRespons
 	}
 }
 
-func (h *ConfigHandler) resolveModelAPIKey(candidate string, kind model.ModelKind, provider, baseURL string) string {
+func (h *ConfigHandler) resolveModelAPIKey(candidate string, kind model.ModelKind, provider, baseURL string, apiKeyConfigured *bool, clearAPIKey bool) string {
 	if candidate != "" {
 		return candidate
+	}
+	if clearAPIKey || (apiKeyConfigured != nil && !*apiKeyConfigured) {
+		return ""
 	}
 	if h == nil || h.appService == nil {
 		return ""
@@ -340,7 +343,7 @@ func (h *ConfigHandler) checkChatModelHealth(ctx context.Context) ComponentHealt
 		Provider:    config.Chat.Provider,
 		BaseURL:     config.Chat.BaseURL,
 		Model:       config.Chat.Model,
-		APIKey:      h.resolveModelAPIKey(config.Chat.APIKey, model.ModelKindChat, config.Chat.Provider, config.Chat.BaseURL),
+		APIKey:      h.resolveModelAPIKey(config.Chat.APIKey, model.ModelKindChat, config.Chat.Provider, config.Chat.BaseURL, nil, false),
 		Temperature: config.Chat.Temperature,
 	}, h.expectedEmbeddingVectorSize())
 	if err != nil {
@@ -376,7 +379,7 @@ func (h *ConfigHandler) checkEmbeddingModelHealth(ctx context.Context) Component
 		Provider: config.Embedding.Provider,
 		BaseURL:  config.Embedding.BaseURL,
 		Model:    config.Embedding.Model,
-		APIKey:   h.resolveModelAPIKey(config.Embedding.APIKey, model.ModelKindEmbedding, config.Embedding.Provider, config.Embedding.BaseURL),
+		APIKey:   h.resolveModelAPIKey(config.Embedding.APIKey, model.ModelKindEmbedding, config.Embedding.Provider, config.Embedding.BaseURL, nil, false),
 	}, h.expectedEmbeddingVectorSize())
 	if err != nil {
 		return ComponentHealth{Status: "error", ErrorMessage: formatErrorMessage(err)}

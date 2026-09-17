@@ -154,3 +154,30 @@ func TestRequestConfigUsesStoredSecretOnlyForConfiguredEndpoint(t *testing.T) {
 		t.Fatalf("expected no embedding secret for an alternate endpoint, got %q", got)
 	}
 }
+
+func TestUpdateConfigCanonicalizesModelProviderAndBaseURL(t *testing.T) {
+	service := NewAppService(nil, NewAppStateStore(""), nil, model.ServerConfig{})
+	_, err := service.UpdateConfig(model.ConfigUpdateRequest{
+		Chat: model.ChatConfig{
+			Provider: " OPENAI ",
+			BaseURL:  "http://127.0.0.1:9000/",
+			Model:    "chat-model",
+		},
+		Embedding: model.EmbeddingConfig{
+			Provider: "openai-compatible",
+			BaseURL:  "http://127.0.0.1:9000/v1/",
+			Model:    "embedding-model",
+		},
+	})
+	if err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	config := service.GetConfig()
+	if config.Chat.Provider != "openai-compatible" || config.Chat.BaseURL != "http://127.0.0.1:9000/v1" {
+		t.Fatalf("expected canonical chat endpoint, got %#v", config.Chat)
+	}
+	if config.Embedding.Provider != "openai-compatible" || config.Embedding.BaseURL != "http://127.0.0.1:9000/v1" {
+		t.Fatalf("expected canonical embedding endpoint, got %#v", config.Embedding)
+	}
+}

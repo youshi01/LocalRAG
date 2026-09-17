@@ -374,6 +374,11 @@ func (s *RagService) EmbedTexts(ctx context.Context, cfg model.EmbeddingModelCon
 	if vectorSize <= 0 {
 		return nil, fmt.Errorf("embedding vector size must be greater than zero")
 	}
+	normalizedCfg, err := normalizeEmbeddingRuntimeConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	cfg = normalizedCfg
 
 	all := make([][]float64, 0, len(trimmed))
 	for i := 0; i < len(trimmed); i += embeddingBatchSize {
@@ -431,6 +436,26 @@ func (s *RagService) EmbedTexts(ctx context.Context, cfg model.EmbeddingModelCon
 		all = append(all, batchVectors...)
 	}
 	return all, nil
+}
+
+func normalizeEmbeddingRuntimeConfig(cfg model.EmbeddingModelConfig) (model.EmbeddingModelConfig, error) {
+	cfg.Provider = strings.TrimSpace(cfg.Provider)
+	if cfg.Provider == "" {
+		cfg.Provider = "ollama"
+	}
+	cfg.BaseURL = strings.TrimSpace(cfg.BaseURL)
+	cfg.Model = strings.TrimSpace(cfg.Model)
+	cfg.APIKey = strings.TrimSpace(cfg.APIKey)
+	if cfg.BaseURL == "" || cfg.Model == "" {
+		return model.EmbeddingModelConfig{}, fmt.Errorf("embedding config is incomplete")
+	}
+	normalizedProvider, normalizedBaseURL, err := normalizeModelEndpoint(cfg.Provider, cfg.BaseURL)
+	if err != nil {
+		return model.EmbeddingModelConfig{}, fmt.Errorf("invalid embedding model endpoint")
+	}
+	cfg.Provider = normalizedProvider
+	cfg.BaseURL = normalizedBaseURL
+	return cfg, nil
 }
 
 func (s *RagService) BuildContext(chunks []RetrievedChunk) (string, []map[string]string) {

@@ -10,10 +10,12 @@ const (
 )
 
 type ModelListRequest struct {
-	Type     ModelKind `json:"type"`
-	Provider string    `json:"provider"`
-	BaseURL  string    `json:"baseUrl"`
-	APIKey   string    `json:"apiKey"`
+	Type             ModelKind `json:"type"`
+	Provider         string    `json:"provider"`
+	BaseURL          string    `json:"baseUrl"`
+	APIKey           string    `json:"apiKey"`
+	APIKeyConfigured *bool     `json:"apiKeyConfigured,omitempty"`
+	ClearAPIKey      bool      `json:"clearApiKey,omitempty"`
 }
 
 type ModelOption struct {
@@ -34,12 +36,14 @@ type ModelListResponse struct {
 }
 
 type ModelProbeRequest struct {
-	Type        ModelKind `json:"type"`
-	Provider    string    `json:"provider"`
-	BaseURL     string    `json:"baseUrl"`
-	Model       string    `json:"model"`
-	APIKey      string    `json:"apiKey"`
-	Temperature float64   `json:"temperature"`
+	Type             ModelKind `json:"type"`
+	Provider         string    `json:"provider"`
+	BaseURL          string    `json:"baseUrl"`
+	Model            string    `json:"model"`
+	APIKey           string    `json:"apiKey"`
+	APIKeyConfigured *bool     `json:"apiKeyConfigured,omitempty"`
+	ClearAPIKey      bool      `json:"clearApiKey,omitempty"`
+	Temperature      float64   `json:"temperature"`
 }
 
 type ModelProbeResponse struct {
@@ -48,8 +52,8 @@ type ModelProbeResponse struct {
 	Provider           string    `json:"provider"`
 	Model              string    `json:"model"`
 	LatencyMs          int64     `json:"latency_ms"`
-	VectorSize         int       `json:"vector_size"`
-	ExpectedVectorSize int       `json:"expected_vector_size"`
+	VectorSize         int       `json:"vector_size,omitempty"`
+	ExpectedVectorSize int       `json:"expected_vector_size,omitempty"`
 	DimensionMatch     *bool     `json:"dimension_match"`
 	ModelInfo          string    `json:"model_info"`
 	ErrorCode          string    `json:"error_code"`

@@ -263,6 +263,87 @@ func TestProbeModelUsesMatchingStoredAPIKeyWithoutLeakingIt(t *testing.T) {
 	}
 }
 
+func TestProbeModelHonorsExplicitAPIKeyClear(t *testing.T) {
+	const storedKey = "stored-key-must-not-be-used"
+	var upstreamAuthorization string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamAuthorization = r.Header.Get("Authorization")
+		if r.URL.Path != "/v1/embeddings" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"index":0,"embedding":[0.1,0.2,0.3,0.4]}]}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	appService := service.NewAppService(nil, nil, nil, model.ServerConfig{QdrantVectorSize: 4})
+	setModelConfigs(t, appService,
+		model.ChatConfig{Provider: "ollama", BaseURL: "http://127.0.0.1:11434", Model: "chat-model"},
+		model.EmbeddingConfig{Provider: "openai-compatible", BaseURL: upstream.URL + "/v1", Model: "embed-model", APIKey: storedKey},
+	)
+	handler := NewConfigHandler(appService, nil)
+	configured := true
+	recorder := invokeConfigHandler(t, http.MethodPost, "/api/config/models/probe", model.ModelProbeRequest{
+		Type: model.ModelKindEmbedding, Provider: "openai", BaseURL: upstream.URL, Model: "embed-model",
+		APIKeyConfigured: &configured, ClearAPIKey: true,
+	}, handler.ProbeModel)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected safe probe response, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if upstreamAuthorization != "" {
+		t.Fatalf("expected cleared key not to be sent, got authorization %q", upstreamAuthorization)
+	}
+	var response model.ModelProbeResponse
+	decodeJSONResponse(t, recorder.Body.Bytes(), &response)
+	if !response.Success {
+		t.Fatalf("expected probe without stored key to succeed, got %#v", response)
+	}
+}
+
+func TestProbeSaveAndRuntimeChatUseCanonicalOpenAIEndpoint(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"model":"chat-model","choices":[{"message":{"role":"assistant","content":"OK"}}]}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	appService := service.NewAppService(nil, nil, nil, model.ServerConfig{})
+	handler := NewConfigHandler(appService, nil)
+	probeRecorder := invokeConfigHandler(t, http.MethodPost, "/api/config/models/probe", model.ModelProbeRequest{
+		Type: model.ModelKindChat, Provider: "openai", BaseURL: upstream.URL, Model: "chat-model",
+	}, handler.ProbeModel)
+	if probeRecorder.Code != http.StatusOK {
+		t.Fatalf("expected probe status 200, got %d: %s", probeRecorder.Code, probeRecorder.Body.String())
+	}
+	var probe model.ModelProbeResponse
+	decodeJSONResponse(t, probeRecorder.Body.Bytes(), &probe)
+	if !probe.Success {
+		t.Fatalf("expected probe success, got %#v", probe)
+	}
+
+	if _, err := appService.UpdateConfig(model.ConfigUpdateRequest{
+		Chat:      model.ChatConfig{Provider: "openai", BaseURL: upstream.URL, Model: "chat-model"},
+		Embedding: model.EmbeddingConfig{Provider: "ollama", BaseURL: "http://127.0.0.1:11434", Model: "embedding-model"},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	chatConfig := appService.CurrentChatConfig()
+	if chatConfig.Provider != "openai-compatible" || chatConfig.BaseURL != upstream.URL+"/v1" {
+		t.Fatalf("expected canonical saved chat config, got %#v", chatConfig)
+	}
+
+	response, err := service.NewLLMService().Chat(model.ChatCompletionRequest{
+		Messages: []model.ChatMessage{{Role: "user", Content: "hello"}},
+		Config:   chatConfig,
+	})
+	if err != nil || len(response.Choices) != 1 || response.Choices[0].Message.Content != "OK" {
+		t.Fatalf("expected saved config to drive runtime chat, response=%#v err=%v", response, err)
+	}
+}
+
 func TestHealthSummaryReportsProbeSuccess(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

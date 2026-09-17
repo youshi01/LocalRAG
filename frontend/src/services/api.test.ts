@@ -31,6 +31,7 @@ describe('model interface requests', () => {
 		expect(fetchMock).toHaveBeenCalledWith('/api/config/models', expect.objectContaining({ method: 'POST' }))
 		expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({
 			type: 'chat', provider: 'ollama', baseUrl: 'http://localhost:11434', apiKey: '',
+			apiKeyConfigured: false, clearApiKey: false,
 		})
 		expect(response.models[0].id).toBe('qwen3.5:9b')
 		expect(response.models[0].owned_by).toBe('library')
@@ -52,9 +53,25 @@ describe('model interface requests', () => {
 		expect(fetchMock).toHaveBeenCalledWith('/api/config/models/probe', expect.objectContaining({ method: 'POST' }))
 		expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({
 			type: 'embedding', provider: 'ollama', baseUrl: 'http://localhost:11434',
-			model: 'nomic-embed-text', apiKey: '',
+			model: 'nomic-embed-text', apiKey: '', apiKeyConfigured: false, clearApiKey: false,
 		})
 		expect(response.dimension_match).toBe(true)
+	})
+
+	it('posts explicit credential-clear intent for model discovery', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+			success: true, provider: 'openai-compatible', type: 'chat', models: [], latency_ms: 3,
+		}), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+		vi.stubGlobal('fetch', fetchMock)
+
+		await fetchAvailableModels({
+			provider: 'openai-compatible', baseUrl: 'https://provider.example/v1', apiKey: '',
+			apiKeyConfigured: true, clearApiKey: true,
+		}, 'chat')
+
+		expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toMatchObject({
+			apiKey: '', apiKeyConfigured: true, clearApiKey: true,
+		})
 	})
 
 	it('posts chat probe temperature without UI-only fields', async () => {
@@ -73,10 +90,8 @@ describe('model interface requests', () => {
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
 		expect(body).toEqual({
 			type: 'chat', provider: 'ollama', baseUrl: 'http://localhost:11434',
-			model: 'qwen3.5:9b', apiKey: '', temperature: 0.2,
+			model: 'qwen3.5:9b', apiKey: '', apiKeyConfigured: true, clearApiKey: false, temperature: 0.2,
 		})
-		expect(body).not.toHaveProperty('apiKeyConfigured')
-		expect(body).not.toHaveProperty('clearApiKey')
 		expect(body).not.toHaveProperty('knowledgeTemperature')
 		expect(body).not.toHaveProperty('contextMessageLimit')
 	})

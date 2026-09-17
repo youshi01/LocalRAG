@@ -5,6 +5,7 @@ import type { ModelOption, ModelProbeResponse } from '../../services/api'
 import {
   isCurrentModelDiscoveryRequest,
   modelOptionLabel,
+  modelProbeKey,
   resetModelOptionsKey,
 } from './modelOptions'
 
@@ -15,6 +16,8 @@ type ModelConfigTestProps =
       baseUrl: string
       modelName: string
       apiKey: string
+      apiKeyConfigured?: boolean
+      clearApiKey?: boolean
       temperature: number
       onModelChange: (value: string) => void
     }
@@ -24,6 +27,8 @@ type ModelConfigTestProps =
       baseUrl: string
       modelName: string
       apiKey: string
+      apiKeyConfigured?: boolean
+      clearApiKey?: boolean
       temperature?: never
       onModelChange: (value: string) => void
     }
@@ -42,11 +47,24 @@ export const ModelConfigTest: React.FC<ModelConfigTestProps> = (props) => {
   const [errorMessage, setErrorMessage] = useState('')
 
   const hasRequiredConfig = Boolean(props.baseUrl.trim() && props.modelName.trim())
-  const modelOptionsKey = resetModelOptionsKey(props.type, props.provider, props.baseUrl)
+  const credentialState = `${props.apiKeyConfigured ? 'configured' : 'unconfigured'}:${props.clearApiKey ? 'clear' : 'keep'}`
+  const modelOptionsKey = resetModelOptionsKey(props.type, props.provider, props.baseUrl, props.apiKey, credentialState)
+  const probeKey = modelProbeKey(
+    props.type,
+    props.provider,
+    props.baseUrl,
+    props.modelName,
+    props.apiKey,
+    props.type === 'chat' ? props.temperature : undefined,
+    credentialState,
+  )
   const currentModelOptionsKey = useRef(modelOptionsKey)
   const discoveryGeneration = useRef(0)
+  const currentProbeKey = useRef(probeKey)
+  const probeGeneration = useRef(0)
 
   currentModelOptionsKey.current = modelOptionsKey
+  currentProbeKey.current = probeKey
 
   useEffect(() => {
     discoveryGeneration.current += 1
@@ -54,6 +72,13 @@ export const ModelConfigTest: React.FC<ModelConfigTestProps> = (props) => {
     setModelListError('')
     setLoadingModels(false)
   }, [modelOptionsKey])
+
+  useEffect(() => {
+    probeGeneration.current += 1
+    setResult(null)
+    setErrorMessage('')
+    setTesting(false)
+  }, [probeKey])
 
   const handleDiscovery = async () => {
     if (!props.baseUrl.trim() || loadingModels) {
@@ -78,6 +103,8 @@ export const ModelConfigTest: React.FC<ModelConfigTestProps> = (props) => {
         provider: props.provider,
         baseUrl: props.baseUrl,
         apiKey: props.apiKey,
+        apiKeyConfigured: props.apiKeyConfigured,
+        clearApiKey: props.clearApiKey,
       }, props.type)
 
       if (!isCurrentRequest()) {
@@ -85,7 +112,7 @@ export const ModelConfigTest: React.FC<ModelConfigTestProps> = (props) => {
       }
 
       if (nextResult.success) {
-        setAvailableModels(nextResult.models)
+        setAvailableModels(nextResult.models ?? [])
       } else {
         setModelListError(nextResult.error_message || '获取模型失败')
       }
@@ -105,6 +132,16 @@ export const ModelConfigTest: React.FC<ModelConfigTestProps> = (props) => {
       return
     }
 
+    const requestKey = probeKey
+    const requestGeneration = probeGeneration.current + 1
+    probeGeneration.current = requestGeneration
+    const isCurrentRequest = () => isCurrentModelDiscoveryRequest(
+      requestKey,
+      requestGeneration,
+      currentProbeKey.current,
+      probeGeneration.current,
+    )
+
     setTesting(true)
     setResult(null)
     setErrorMessage('')
@@ -117,6 +154,8 @@ export const ModelConfigTest: React.FC<ModelConfigTestProps> = (props) => {
               baseUrl: props.baseUrl,
               model: props.modelName,
               apiKey: props.apiKey,
+              apiKeyConfigured: props.apiKeyConfigured,
+              clearApiKey: props.clearApiKey,
               temperature: props.temperature,
               knowledgeTemperature: 0.1,
               contextMessageLimit: 1,
@@ -126,13 +165,21 @@ export const ModelConfigTest: React.FC<ModelConfigTestProps> = (props) => {
               baseUrl: props.baseUrl,
               model: props.modelName,
               apiKey: props.apiKey,
+              apiKeyConfigured: props.apiKeyConfigured,
+              clearApiKey: props.clearApiKey,
             }, props.type)
 
-      setResult(nextResult)
+      if (isCurrentRequest()) {
+        setResult(nextResult)
+      }
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : '模型测试请求失败')
+      if (isCurrentRequest()) {
+        setErrorMessage(error instanceof Error ? error.message : '模型测试请求失败')
+      }
     } finally {
-      setTesting(false)
+      if (isCurrentRequest()) {
+        setTesting(false)
+      }
     }
   }
 
@@ -203,10 +250,10 @@ export const ModelConfigTest: React.FC<ModelConfigTestProps> = (props) => {
             {typeof result?.latency_ms === 'number' ? (
               <span className="test-latency">{result.latency_ms} ms</span>
             ) : null}
-            {typeof result?.vector_size === 'number' ? (
+            {props.type === 'embedding' && typeof result?.vector_size === 'number' ? (
               <span className="test-info">模型输出维度：{result.vector_size}</span>
             ) : null}
-            {typeof result?.expected_vector_size === 'number' ? (
+            {props.type === 'embedding' && typeof result?.expected_vector_size === 'number' ? (
               <span className="test-info">
                 Qdrant 配置维度：{result.expected_vector_size}
               </span>

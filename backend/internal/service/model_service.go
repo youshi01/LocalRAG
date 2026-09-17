@@ -73,7 +73,7 @@ func (s *ModelService) ListModels(parent context.Context, request model.ModelLis
 		return result, nil
 	}
 
-	var options []model.ModelOption
+	options := make([]model.ModelOption, 0)
 	if normalizedProvider == "ollama" {
 		var payload struct {
 			Models []struct {

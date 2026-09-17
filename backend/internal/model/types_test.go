@@ -49,6 +49,16 @@ func TestModelProbeResponseJSONUsesSnakeCaseWireNames(t *testing.T) {
 	})
 }
 
+func TestChatModelProbeResponseOmitsEmbeddingOnlyFields(t *testing.T) {
+	response := ModelProbeResponse{Success: true, Type: ModelKindChat, Provider: "ollama", Model: "chat-model"}
+	object := assertJSONKeys(t, response, []string{"success", "type", "provider", "model"})
+	for _, key := range []string{"vector_size", "expected_vector_size"} {
+		if _, ok := object[key]; ok {
+			t.Fatalf("did not expect chat probe field %q in %#v", key, object)
+		}
+	}
+}
+
 func assertJSONKeys(t *testing.T, value any, expectedKeys []string) map[string]any {
 	t.Helper()
 

@@ -966,11 +966,18 @@ export const testChatModelConfig = async (
 )
 
 export const fetchAvailableModels = async (
-  config: Pick<ChatConfig, 'provider' | 'baseUrl' | 'apiKey'> | Pick<EmbeddingConfig, 'provider' | 'baseUrl' | 'apiKey'>,
+  config: Pick<ChatConfig, 'provider' | 'baseUrl' | 'apiKey' | 'apiKeyConfigured' | 'clearApiKey'> | Pick<EmbeddingConfig, 'provider' | 'baseUrl' | 'apiKey' | 'apiKeyConfigured' | 'clearApiKey'>,
   type: ModelKind,
 ): Promise<ModelListResponse> => requestJson<ModelListResponse>(
   '/api/config/models',
-  jsonRequest({ type, provider: config.provider, baseUrl: config.baseUrl, apiKey: config.apiKey }, { method: 'POST' }),
+  jsonRequest({
+    type,
+    provider: config.provider,
+    baseUrl: config.baseUrl,
+    apiKey: config.apiKey,
+    apiKeyConfigured: Boolean(config.apiKeyConfigured),
+    clearApiKey: Boolean(config.clearApiKey),
+  }, { method: 'POST' }),
 )
 
 export const probeModel = async (
@@ -984,6 +991,8 @@ export const probeModel = async (
     baseUrl: config.baseUrl,
     model: config.model,
     apiKey: config.apiKey,
+    apiKeyConfigured: Boolean(config.apiKeyConfigured),
+    clearApiKey: Boolean(config.clearApiKey),
     ...(type === 'chat' && 'temperature' in config ? { temperature: config.temperature } : {}),
   }, { method: 'POST' }),
 )

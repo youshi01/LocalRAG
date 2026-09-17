@@ -232,6 +232,26 @@ func TestListModelsDeduplicatesAndSortsIDs(t *testing.T) {
 	}
 }
 
+func TestListModelsReturnsNonNilEmptyModels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tags" {
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+		_, _ = io.WriteString(w, `{"models":[]}`)
+	}))
+	t.Cleanup(server.Close)
+
+	result, err := (&ModelService{client: server.Client()}).ListModels(t.Context(), model.ModelListRequest{
+		Type: model.ModelKindChat, Provider: "ollama", BaseURL: server.URL,
+	})
+	if err != nil || !result.Success {
+		t.Fatalf("list models: result=%#v err=%v", result, err)
+	}
+	if result.Models == nil || len(result.Models) != 0 {
+		t.Fatalf("expected a non-nil empty model list, got %#v", result.Models)
+	}
+}
+
 func TestProbeOllamaChatSendsExpectedPayload(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/chat" {

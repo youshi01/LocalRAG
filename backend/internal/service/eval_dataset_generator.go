@@ -1053,10 +1053,11 @@ func selectEvalChunkCandidates(chunks []DocumentChunk, maxCount int) []DocumentC
 		return nil
 	}
 
+	const minEvalTextRunes = 32
 	candidates := make([]DocumentChunk, 0, len(chunks))
 	for _, chunk := range chunks {
 		text := normalizeEvalWhitespace(chunk.Text)
-		if utf8.RuneCountInString(text) < 40 && !isStructuredEvalChunkKind(chunk.Kind) {
+		if utf8.RuneCountInString(text) < minEvalTextRunes && !isStructuredEvalChunkKind(chunk.Kind) {
 			continue
 		}
 		if isLowValueEvalChunk(text) {

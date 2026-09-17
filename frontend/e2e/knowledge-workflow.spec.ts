@@ -202,6 +202,10 @@ test.describe('知识库核心浏览器工作流', () => {
     const detailDialog = page.locator('.kb-detail-dialog')
     await expect(detailDialog).toBeVisible()
     await expect(detailDialog).toContainText(fileName)
-    await expect(detailDialog.locator('.kb-detail-chunk--focused')).toContainText('Qdrant 的 payload')
+    if (publicFixtureEnabled) {
+      await expect(detailDialog.locator('.kb-detail-chunk--focused')).toContainText('Qdrant 的 payload')
+    } else {
+      await expect(detailDialog.locator('.kb-detail-chunk--focused')).toBeVisible()
+    }
   })
 })

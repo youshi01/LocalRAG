@@ -25,11 +25,11 @@ npm install
 npm run dev
 ```
 
-Vite 开发服务器运行在 `:5173`，已配置代理将 API 请求转发到 `:8080`。
+Vite 开发服务器运行在 `:3000`，已配置代理将 API 请求转发到 `:8080`。如果使用 Docker Compose，前端容器通过 `http://localhost:4173` 访问；`4173` 不是本地 Vite 开发服务器端口。
 
 ### 4. 访问应用
 
-浏览器打开 `http://localhost:5173`。
+浏览器打开 `http://localhost:3000`。
 
 ---
 

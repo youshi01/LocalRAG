@@ -33,6 +33,28 @@ docker compose -f docker-compose.dev.yml up --build
 
 `docker-compose.dev.yml` 会同时启动 Qdrant、后端和前端开发服务器，并挂载本地代码，适合日常开发和 UI 调试。
 
+### 本地 Ollama 模型配置
+
+首次进入设置页后，需要确认 Chat 与 Embedding 模型在本机 Ollama 中已经存在。Windows Docker
+开发环境中，后端访问宿主机 Ollama 使用 `http://host.docker.internal:11434`；Windows
+本机直接运行后端使用 `http://localhost:11434`。本项目中期演示采用：
+
+```text
+Chat:      ollama / qwen3.5:9b
+Embedding: ollama / nomic-embed-text
+向量维度:  768
+```
+
+可按需执行：
+
+```bash
+ollama pull qwen3.5:9b
+ollama pull nomic-embed-text
+```
+
+保存配置后，先在设置页运行 Chat/Embedding 连通性检查，再上传文档。若更换 Embedding
+模型，必须确认输出维度与 `QDRANT_VECTOR_SIZE` 一致；维度变化时请重建知识库索引。
+
 ### 后端运行（可选）
 
 只有在需要单独调试后端进程时使用：
@@ -67,6 +89,18 @@ npm run dev
 cd frontend
 npm run build
 ```
+
+### 前端自动化测试
+
+```bash
+cd frontend
+npm test
+npm run typecheck
+npm run lint
+```
+
+浏览器工作流测试需要可用的 Chromium，并通过环境变量提供合成演示文件和查询；具体变量见
+[`frontend/e2e/README.md`](../frontend/e2e/README.md)。
 
 ### 启动 Qdrant（可选）
 

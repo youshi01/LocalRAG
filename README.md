@@ -70,6 +70,7 @@ docker compose up --build
 3. 打开 `http://localhost:4173`，进入设置页配置 Chat 与 Embedding 模型。
 
 如需更完整的命令、环境变量与接口说明，请查看 [`docs/getting-started.md`](docs/getting-started.md)。
+中期验收材料见 [`docs/midterm-check.md`](docs/midterm-check.md)。
 
 ---
 
@@ -162,18 +163,23 @@ docker compose -f docker-compose.dev.yml up --build
 
 ### Ollama 示例
 
+Docker Desktop（Windows）中的后端访问宿主机 Ollama 时，Base URL 使用
+`http://host.docker.internal:11434`；直接在 Windows 本机运行后端时使用
+`http://localhost:11434`。本项目中期演示使用的本地模型为 `qwen3.5:9b` 和
+`nomic-embed-text`，其中后者输出 768 维向量。
+
 **Chat 配置**
 
 - Provider: `ollama`
-- Base URL: `http://localhost:11434`
-- Model: `qwen2.5:7b` 或 `llama3.2`
+- Base URL: `http://localhost:11434`（Docker 使用 `http://host.docker.internal:11434`）
+- Model: `qwen3.5:9b`，也可以替换为本机已安装的其他 Ollama Chat 模型
 - API Key: 留空
 
 **Embedding 配置**
 
 - Provider: `ollama`
-- Base URL: `http://localhost:11434`
-- Model: `bge-m3` 或 `nomic-embed-text`
+- Base URL: `http://localhost:11434`（Docker 使用 `http://host.docker.internal:11434`）
+- Model: `nomic-embed-text`
 - API Key: 留空
 
 ### OpenAI Compatible 示例

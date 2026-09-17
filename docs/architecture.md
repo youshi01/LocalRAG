@@ -116,7 +116,7 @@ localrag/
 
 - **侧边栏**：会话管理（新建/切换/删除）、知识库/文档筛选、设置入口
 - **聊天区域**：消息显示（Markdown 渲染）、SSE 流式打字机效果、知识库选择
-- **知识库面板**：创建知识库、上传文档（TXT/MD/PDF）、删除文档
+- **知识库面板**：创建知识库、上传文档（TXT/MD/PDF/XLSX/CSV）、删除文档
 - **设置面板**：Chat 模型配置（Provider/BaseURL/Model/APIKey/Temperature）、Embedding 模型配置
 
 ## 核心服务说明

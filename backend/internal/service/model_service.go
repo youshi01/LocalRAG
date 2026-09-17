@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,8 +17,9 @@ import (
 )
 
 const (
-	modelDiscoveryTimeout = 8 * time.Second
-	modelProbeTimeout     = 15 * time.Second
+	modelDiscoveryTimeout      = 8 * time.Second
+	modelDiscoveryMaxBodyBytes = 4 << 20
+	modelProbeTimeout          = 15 * time.Second
 )
 
 type ModelService struct {
@@ -128,7 +130,15 @@ func (s *ModelService) ListModels(parent context.Context, request model.ModelLis
 }
 
 func decodeStrictJSON(reader io.Reader, destination any) error {
-	decoder := json.NewDecoder(reader)
+	body, err := io.ReadAll(io.LimitReader(reader, modelDiscoveryMaxBodyBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(body) > modelDiscoveryMaxBodyBytes {
+		return errors.New("model discovery response exceeds size limit")
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	if err := decoder.Decode(destination); err != nil {
 		return err
 	}

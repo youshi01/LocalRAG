@@ -196,6 +196,23 @@ func TestListModelsRejectsTrailingJSONValues(t *testing.T) {
 	}
 }
 
+func TestListModelsRejectsResponseBeyondSizeLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"data":[]}`+strings.Repeat(" ", 4<<20))
+	}))
+	t.Cleanup(server.Close)
+
+	result, err := (&ModelService{client: server.Client()}).ListModels(t.Context(), model.ModelListRequest{
+		Type: model.ModelKindChat, Provider: "openai-compatible", BaseURL: server.URL,
+	})
+	if err != nil {
+		t.Fatalf("list models: %v", err)
+	}
+	if result.Success || result.ErrorCode != "invalid_response" || result.ErrorMessage != "模型列表响应格式无效" {
+		t.Fatalf("expected oversized response to be invalid, got %#v", result)
+	}
+}
+
 func TestListModelsDeduplicatesAndSortsIDs(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"data":[{"id":"z-model"},{"id":"a-model"},{"id":"z-model"}]}`)

@@ -2,6 +2,60 @@ package model
 
 import "sync"
 
+type ModelKind string
+
+const (
+	ModelKindChat      ModelKind = "chat"
+	ModelKindEmbedding ModelKind = "embedding"
+)
+
+type ModelListRequest struct {
+	Type     ModelKind `json:"type"`
+	Provider string    `json:"provider"`
+	BaseURL  string    `json:"baseUrl"`
+	APIKey   string    `json:"apiKey"`
+}
+
+type ModelOption struct {
+	ID      string    `json:"id"`
+	Name    string    `json:"name"`
+	Type    ModelKind `json:"type"`
+	OwnedBy string    `json:"ownedBy"`
+}
+
+type ModelListResponse struct {
+	Success      bool          `json:"success"`
+	Provider     string        `json:"provider"`
+	Type         ModelKind     `json:"type"`
+	Models       []ModelOption `json:"models"`
+	LatencyMs    int64         `json:"latencyMs"`
+	ErrorCode    string        `json:"errorCode"`
+	ErrorMessage string        `json:"errorMessage"`
+}
+
+type ModelProbeRequest struct {
+	Type        ModelKind `json:"type"`
+	Provider    string    `json:"provider"`
+	BaseURL     string    `json:"baseUrl"`
+	Model       string    `json:"model"`
+	APIKey      string    `json:"apiKey"`
+	Temperature float64   `json:"temperature"`
+}
+
+type ModelProbeResponse struct {
+	Success            bool      `json:"success"`
+	Type               ModelKind `json:"type"`
+	Provider           string    `json:"provider"`
+	Model              string    `json:"model"`
+	LatencyMs          int64     `json:"latencyMs"`
+	VectorSize         int       `json:"vectorSize"`
+	ExpectedVectorSize int       `json:"expectedVectorSize"`
+	DimensionMatch     *bool     `json:"dimensionMatch"`
+	ModelInfo          string    `json:"modelInfo"`
+	ErrorCode          string    `json:"errorCode"`
+	ErrorMessage       string    `json:"errorMessage"`
+}
+
 type ServerConfig struct {
 	Port                           string
 	UploadDir                      string

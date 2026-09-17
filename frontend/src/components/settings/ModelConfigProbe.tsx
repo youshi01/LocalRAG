@@ -1,8 +1,12 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { fetchAvailableModels, probeModel } from '../../services/api'
 import type { ChatConfig, EmbeddingConfig } from '../../App'
 import type { ModelOption, ModelProbeResponse } from '../../services/api'
-import { modelOptionLabel, resetModelOptionsKey } from './modelOptions'
+import {
+  isCurrentModelDiscoveryRequest,
+  modelOptionLabel,
+  resetModelOptionsKey,
+} from './modelOptions'
 
 type ModelConfigTestProps =
   | {
@@ -39,16 +43,32 @@ export const ModelConfigTest: React.FC<ModelConfigTestProps> = (props) => {
 
   const hasRequiredConfig = Boolean(props.baseUrl.trim() && props.modelName.trim())
   const modelOptionsKey = resetModelOptionsKey(props.type, props.provider, props.baseUrl)
+  const currentModelOptionsKey = useRef(modelOptionsKey)
+  const discoveryGeneration = useRef(0)
+
+  currentModelOptionsKey.current = modelOptionsKey
 
   useEffect(() => {
+    discoveryGeneration.current += 1
     setAvailableModels([])
     setModelListError('')
+    setLoadingModels(false)
   }, [modelOptionsKey])
 
   const handleDiscovery = async () => {
     if (!props.baseUrl.trim() || loadingModels) {
       return
     }
+
+    const requestKey = modelOptionsKey
+    const requestGeneration = discoveryGeneration.current + 1
+    discoveryGeneration.current = requestGeneration
+    const isCurrentRequest = () => isCurrentModelDiscoveryRequest(
+      requestKey,
+      requestGeneration,
+      currentModelOptionsKey.current,
+      discoveryGeneration.current,
+    )
 
     setLoadingModels(true)
     setModelListError('')
@@ -60,15 +80,23 @@ export const ModelConfigTest: React.FC<ModelConfigTestProps> = (props) => {
         apiKey: props.apiKey,
       }, props.type)
 
+      if (!isCurrentRequest()) {
+        return
+      }
+
       if (nextResult.success) {
         setAvailableModels(nextResult.models)
       } else {
         setModelListError(nextResult.error_message || '获取模型失败')
       }
     } catch (error) {
-      setModelListError(error instanceof Error ? error.message : '获取模型请求失败')
+      if (isCurrentRequest()) {
+        setModelListError(error instanceof Error ? error.message : '获取模型请求失败')
+      }
     } finally {
-      setLoadingModels(false)
+      if (isCurrentRequest()) {
+        setLoadingModels(false)
+      }
     }
   }
 

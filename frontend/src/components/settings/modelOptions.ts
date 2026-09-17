@@ -5,3 +5,10 @@ export const resetModelOptionsKey = (type: string, provider: string, baseUrl: st
 
 export const modelOptionLabel = (option: ModelOption) =>
   option.owned_by ? option.name + ' · ' + option.owned_by : option.name
+
+export const isCurrentModelDiscoveryRequest = (
+  requestKey: string,
+  requestGeneration: number,
+  currentKey: string,
+  currentGeneration: number,
+) => requestKey === currentKey && requestGeneration === currentGeneration

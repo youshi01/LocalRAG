@@ -67,6 +67,20 @@ func TestNormalizeModelEndpointRejectsUserInfoWithoutLeakingSecret(t *testing.T)
 	}
 }
 
+func TestNormalizeModelEndpointRejectsQueryAndFragment(t *testing.T) {
+	for _, suffix := range []string{"?api_key=should-not-be-sent", "#fragment"} {
+		t.Run(suffix, func(t *testing.T) {
+			_, _, err := normalizeModelEndpoint("ollama", "http://127.0.0.1:11434"+suffix)
+			if err == nil {
+				t.Fatal("expected query or fragment endpoint validation error")
+			}
+			if strings.Contains(err.Error(), suffix) || strings.Contains(err.Error(), "should-not-be-sent") {
+				t.Fatalf("endpoint validation error leaked URL data: %q", err)
+			}
+		})
+	}
+}
+
 func TestNormalizeModelKindRejectsUnsupportedValues(t *testing.T) {
 	for _, kind := range []model.ModelKind{"audio", "invalid"} {
 		if _, err := normalizeModelKind(kind); err == nil {
@@ -150,5 +164,51 @@ func TestListModelsNeverReturnsUpstreamBodyOrAPIKey(t *testing.T) {
 	}
 	if strings.Contains(result.ErrorMessage, "secret-discovery-key") {
 		t.Fatalf("error leaked secret: %q", result.ErrorMessage)
+	}
+}
+
+func TestListModelsRejectsTrailingJSONValues(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider string
+		body     string
+	}{
+		{name: "ollama", provider: "ollama", body: `{"models":[]}garbage`},
+		{name: "openai", provider: "openai-compatible", body: `{"data":[]} {"data":[]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			t.Cleanup(server.Close)
+
+			result, err := (&ModelService{client: server.Client()}).ListModels(t.Context(), model.ModelListRequest{
+				Type: model.ModelKindChat, Provider: tc.provider, BaseURL: server.URL,
+			})
+			if err != nil {
+				t.Fatalf("list models: %v", err)
+			}
+			if result.Success || result.ErrorCode != "invalid_response" || result.ErrorMessage != "模型列表响应格式无效" {
+				t.Fatalf("expected invalid response, got %#v", result)
+			}
+		})
+	}
+}
+
+func TestListModelsDeduplicatesAndSortsIDs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"data":[{"id":"z-model"},{"id":"a-model"},{"id":"z-model"}]}`)
+	}))
+	t.Cleanup(server.Close)
+
+	result, err := (&ModelService{client: server.Client()}).ListModels(t.Context(), model.ModelListRequest{
+		Type: model.ModelKindChat, Provider: "openai-compatible", BaseURL: server.URL,
+	})
+	if err != nil || !result.Success || len(result.Models) != 2 {
+		t.Fatalf("list models: result=%#v err=%v", result, err)
+	}
+	if result.Models[0].ID != "a-model" || result.Models[1].ID != "z-model" {
+		t.Fatalf("expected sorted unique IDs, got %#v", result.Models)
 	}
 }

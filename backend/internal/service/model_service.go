@@ -71,7 +71,6 @@ func (s *ModelService) ListModels(parent context.Context, request model.ModelLis
 	}
 
 	var options []model.ModelOption
-	decoder := json.NewDecoder(io.LimitReader(response.Body, 4<<20))
 	if normalizedProvider == "ollama" {
 		var payload struct {
 			Models []struct {
@@ -79,7 +78,7 @@ func (s *ModelService) ListModels(parent context.Context, request model.ModelLis
 				Model string `json:"model"`
 			} `json:"models"`
 		}
-		if err := decoder.Decode(&payload); err != nil {
+		if err := decodeStrictJSON(response.Body, &payload); err != nil {
 			result.ErrorCode, result.ErrorMessage = "invalid_response", "模型列表响应格式无效"
 			return result, nil
 		}
@@ -105,7 +104,7 @@ func (s *ModelService) ListModels(parent context.Context, request model.ModelLis
 				OwnedBy string `json:"owned_by"`
 			} `json:"data"`
 		}
-		if err := decoder.Decode(&payload); err != nil {
+		if err := decodeStrictJSON(response.Body, &payload); err != nil {
 			result.ErrorCode, result.ErrorMessage = "invalid_response", "模型列表响应格式无效"
 			return result, nil
 		}
@@ -126,6 +125,21 @@ func (s *ModelService) ListModels(parent context.Context, request model.ModelLis
 	result.Success = true
 	result.Models = options
 	return result, nil
+}
+
+func decodeStrictJSON(reader io.Reader, destination any) error {
+	decoder := json.NewDecoder(reader)
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return errors.New("multiple JSON values")
+		}
+		return err
+	}
+	return nil
 }
 
 func nonNegativeMilliseconds(duration time.Duration) int64 {
@@ -191,6 +205,9 @@ func normalizeModelEndpoint(provider, baseURL string) (normalizedProvider, norma
 		return "", "", fmt.Errorf("invalid model endpoint URL")
 	}
 	if parsed.User != nil {
+		return "", "", fmt.Errorf("invalid model endpoint URL")
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
 		return "", "", fmt.Errorf("invalid model endpoint URL")
 	}
 	if parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {

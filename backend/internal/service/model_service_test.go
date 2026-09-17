@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -81,5 +84,71 @@ func TestModelServiceRejectsUnsupportedModelKinds(t *testing.T) {
 		if _, err := service.Probe(context.Background(), model.ModelProbeRequest{Type: kind}, 0); err == nil {
 			t.Fatalf("expected Probe to reject model kind %q", kind)
 		}
+	}
+}
+
+func TestListModelsReadsOllamaTagsAndMeasuresLatency(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/tags" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"models":[{"name":"nomic-embed-text"},{"model":"qwen3.5:9b"}]}`)
+	}))
+	t.Cleanup(server.Close)
+
+	result, err := (&ModelService{client: server.Client()}).ListModels(t.Context(), model.ModelListRequest{
+		Type: model.ModelKindChat, Provider: "ollama", BaseURL: server.URL,
+	})
+	if err != nil || !result.Success {
+		t.Fatalf("list models: result=%#v err=%v", result, err)
+	}
+	if result.LatencyMs < 0 || len(result.Models) != 2 {
+		t.Fatalf("expected two models and non-negative latency, got %#v", result)
+	}
+	if result.Models[0].Type != model.ModelKindChat {
+		t.Fatalf("expected requested model type, got %#v", result.Models[0])
+	}
+}
+
+func TestListModelsReadsOpenAIModelsWithBearerToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" || r.Header.Get("Authorization") != "Bearer discovery-secret" {
+			t.Fatalf("unexpected request: path=%s authorization=%q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		_, _ = io.WriteString(w, `{"data":[{"id":"chat-model","owned_by":"test"}]}`)
+	}))
+	t.Cleanup(server.Close)
+
+	result, err := (&ModelService{client: server.Client()}).ListModels(t.Context(), model.ModelListRequest{
+		Type: model.ModelKindEmbedding, Provider: "openai-compatible", BaseURL: server.URL,
+		APIKey: "discovery-secret",
+	})
+	if err != nil || !result.Success || len(result.Models) != 1 {
+		t.Fatalf("list models: result=%#v err=%v", result, err)
+	}
+	if result.Models[0].OwnedBy != "test" || result.Models[0].Type != model.ModelKindEmbedding {
+		t.Fatalf("unexpected model option: %#v", result.Models[0])
+	}
+}
+
+func TestListModelsNeverReturnsUpstreamBodyOrAPIKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"secret-discovery-key"}`, http.StatusUnauthorized)
+	}))
+	t.Cleanup(server.Close)
+
+	result, err := (&ModelService{client: server.Client()}).ListModels(t.Context(), model.ModelListRequest{
+		Type: model.ModelKindChat, Provider: "openai-compatible", BaseURL: server.URL,
+		APIKey: "secret-discovery-key",
+	})
+	if err != nil {
+		t.Fatalf("expected safe response instead of transport error: %v", err)
+	}
+	if result.Success || result.ErrorCode != "authentication_failed" {
+		t.Fatalf("expected authentication failure, got %#v", result)
+	}
+	if strings.Contains(result.ErrorMessage, "secret-discovery-key") {
+		t.Fatalf("error leaked secret: %q", result.ErrorMessage)
 	}
 }

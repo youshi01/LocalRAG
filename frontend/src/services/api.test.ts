@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import {
 	extractErrorMessage,
 	fetchAvailableModels,
@@ -19,7 +19,7 @@ describe('model interface requests', () => {
 			success: true,
 			provider: 'ollama',
 			type: 'chat',
-			models: [{ id: 'qwen3.5:9b', name: 'qwen3.5:9b', type: 'chat' }],
+			models: [{ id: 'qwen3.5:9b', name: 'qwen3.5:9b', type: 'chat', owned_by: 'library' }],
 			latency_ms: 24,
 		}), { status: 200, headers: { 'Content-Type': 'application/json' } }))
 		vi.stubGlobal('fetch', fetchMock)
@@ -33,6 +33,8 @@ describe('model interface requests', () => {
 			type: 'chat', provider: 'ollama', baseUrl: 'http://localhost:11434', apiKey: '',
 		})
 		expect(response.models[0].id).toBe('qwen3.5:9b')
+		expect(response.models[0].owned_by).toBe('library')
+		expectTypeOf(response.models[0].owned_by).toEqualTypeOf<string>()
 	})
 
 	it('posts the selected model to probe it', async () => {
@@ -53,6 +55,46 @@ describe('model interface requests', () => {
 			model: 'nomic-embed-text', apiKey: '',
 		})
 		expect(response.dimension_match).toBe(true)
+	})
+
+	it('posts chat probe temperature without UI-only fields', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+			success: true, type: 'chat', provider: 'ollama', model: 'qwen3.5:9b',
+			latency_ms: 24,
+		}), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+		vi.stubGlobal('fetch', fetchMock)
+
+		await probeModel({
+			provider: 'ollama', baseUrl: 'http://localhost:11434', model: 'qwen3.5:9b', apiKey: '',
+			temperature: 0.2, knowledgeTemperature: 0.1, contextMessageLimit: 10,
+			apiKeyConfigured: true, clearApiKey: false,
+		}, 'chat')
+
+		const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+		expect(body).toEqual({
+			type: 'chat', provider: 'ollama', baseUrl: 'http://localhost:11434',
+			model: 'qwen3.5:9b', apiKey: '', temperature: 0.2,
+		})
+		expect(body).not.toHaveProperty('apiKeyConfigured')
+		expect(body).not.toHaveProperty('clearApiKey')
+		expect(body).not.toHaveProperty('knowledgeTemperature')
+		expect(body).not.toHaveProperty('contextMessageLimit')
+	})
+
+	it('preserves an explicit null dimension match from an embedding probe', async () => {
+		const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+			success: false, type: 'embedding', provider: 'ollama', model: 'nomic-embed-text',
+			latency_ms: 214, vector_size: 768, expected_vector_size: 768,
+			dimension_match: null,
+		}), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+		vi.stubGlobal('fetch', fetchMock)
+
+		const response = await probeModel({
+			provider: 'ollama', baseUrl: 'http://localhost:11434', model: 'nomic-embed-text', apiKey: '',
+		}, 'embedding')
+
+		expect(response.dimension_match).toBeNull()
+		expectTypeOf(response.dimension_match).toEqualTypeOf<boolean | null>()
 	})
 })
 

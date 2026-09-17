@@ -143,6 +143,7 @@ export interface ModelOption {
   id: string
   name: string
   type: ModelKind
+  owned_by: string
 }
 
 export interface ModelListResponse {
@@ -165,7 +166,7 @@ export interface ModelProbeResponse {
   error_message?: string
   vector_size?: number
   expected_vector_size?: number
-  dimension_match?: boolean
+  dimension_match: boolean | null
   model_info?: string
 }
 

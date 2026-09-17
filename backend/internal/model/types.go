@@ -20,7 +20,7 @@ type ModelOption struct {
 	ID      string    `json:"id"`
 	Name    string    `json:"name"`
 	Type    ModelKind `json:"type"`
-	OwnedBy string    `json:"ownedBy"`
+	OwnedBy string    `json:"owned_by"`
 }
 
 type ModelListResponse struct {
@@ -28,9 +28,9 @@ type ModelListResponse struct {
 	Provider     string        `json:"provider"`
 	Type         ModelKind     `json:"type"`
 	Models       []ModelOption `json:"models"`
-	LatencyMs    int64         `json:"latencyMs"`
-	ErrorCode    string        `json:"errorCode"`
-	ErrorMessage string        `json:"errorMessage"`
+	LatencyMs    int64         `json:"latency_ms"`
+	ErrorCode    string        `json:"error_code"`
+	ErrorMessage string        `json:"error_message"`
 }
 
 type ModelProbeRequest struct {
@@ -47,13 +47,13 @@ type ModelProbeResponse struct {
 	Type               ModelKind `json:"type"`
 	Provider           string    `json:"provider"`
 	Model              string    `json:"model"`
-	LatencyMs          int64     `json:"latencyMs"`
-	VectorSize         int       `json:"vectorSize"`
-	ExpectedVectorSize int       `json:"expectedVectorSize"`
-	DimensionMatch     *bool     `json:"dimensionMatch"`
-	ModelInfo          string    `json:"modelInfo"`
-	ErrorCode          string    `json:"errorCode"`
-	ErrorMessage       string    `json:"errorMessage"`
+	LatencyMs          int64     `json:"latency_ms"`
+	VectorSize         int       `json:"vector_size"`
+	ExpectedVectorSize int       `json:"expected_vector_size"`
+	DimensionMatch     *bool     `json:"dimension_match"`
+	ModelInfo          string    `json:"model_info"`
+	ErrorCode          string    `json:"error_code"`
+	ErrorMessage       string    `json:"error_message"`
 }
 
 type ServerConfig struct {

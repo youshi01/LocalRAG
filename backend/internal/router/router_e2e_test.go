@@ -111,6 +111,48 @@ func TestRouterConfigEndpoints(t *testing.T) {
 	}
 }
 
+func TestRouterModelDiscoveryAndProbeEndpoints(t *testing.T) {
+	engine, modelBaseURL, cleanup := newTestRouter(t)
+	defer cleanup()
+
+	listResp := performJSONRequest(t, engine, http.MethodPost, "/api/config/models", model.ModelListRequest{
+		Type: model.ModelKindChat, Provider: "ollama", BaseURL: modelBaseURL,
+	})
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("expected model discovery status 200, got %d, body=%s", listResp.Code, listResp.Body.String())
+	}
+	var listResult model.ModelListResponse
+	decodeJSONResponse(t, listResp.Body.Bytes(), &listResult)
+	if !listResult.Success {
+		t.Fatalf("expected model discovery success, got %#v", listResult)
+	}
+	modelIDs := make(map[string]bool, len(listResult.Models))
+	for _, option := range listResult.Models {
+		modelIDs[option.ID] = true
+	}
+	if !modelIDs["qwen3.5:9b"] || !modelIDs["nomic-embed-text"] {
+		t.Fatalf("expected fixture models in discovery response, got %#v", listResult.Models)
+	}
+
+	probeResp := performJSONRequest(t, engine, http.MethodPost, "/api/config/models/probe", model.ModelProbeRequest{
+		Type: model.ModelKindChat, Provider: "ollama", BaseURL: modelBaseURL, Model: "chat-test-model",
+	})
+	if probeResp.Code != http.StatusOK {
+		t.Fatalf("expected model probe status 200, got %d, body=%s", probeResp.Code, probeResp.Body.String())
+	}
+	var probeResult model.ModelProbeResponse
+	decodeJSONResponse(t, probeResp.Body.Bytes(), &probeResult)
+	if !probeResult.Success || probeResult.Model != "chat-test-model" || probeResult.LatencyMs < 0 {
+		t.Fatalf("unexpected model probe response: %#v", probeResult)
+	}
+
+	for _, endpoint := range []string{"/api/config/models", "/api/config/models/probe"} {
+		resp := performJSONRequest(t, engine, http.MethodPost, endpoint, map[string]any{})
+		if resp.Code != http.StatusBadRequest {
+			t.Fatalf("expected empty request to %s to return 400, got %d, body=%s", endpoint, resp.Code, resp.Body.String())
+		}
+	}
+}
 func TestMCPRequiresAuthorizationHeader(t *testing.T) {
 	engine, _, _, cleanup := newAuthenticatedTestRouter(t)
 	defer cleanup()
@@ -2613,6 +2655,20 @@ func handleModelAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	switch r.URL.Path {
+	case "/api/tags":
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"models": []map[string]any{
+				{"name": "qwen3.5:9b"},
+				{"name": "nomic-embed-text"},
+			},
+		})
+	case "/v1/models":
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"id": "chat-test-model", "owned_by": "test"},
+				{"id": "embedding-test-model", "owned_by": "test"},
+			},
+		})
 	case "/embeddings":
 		var req struct {
 			Input []string `json:"input"`

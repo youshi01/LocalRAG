@@ -59,6 +59,8 @@ func NewRouter(appHandler *handler.AppHandler, configHandler *handler.ConfigHand
 		api.GET("/config", appHandler.GetConfig)
 		api.PUT("/config", appHandler.UpdateConfig)
 		api.POST("/config/mcp/reset-token", appHandler.ResetMCPToken)
+		api.POST("/config/models", configHandler.ListModels)
+		api.POST("/config/models/probe", configHandler.ProbeModel)
 		api.POST("/config/test-chat-model", configHandler.TestChatModel)
 		api.POST("/config/test-embedding-model", configHandler.TestEmbeddingModel)
 		api.GET("/config/health-summary", configHandler.HealthSummary)

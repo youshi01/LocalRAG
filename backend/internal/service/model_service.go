@@ -21,12 +21,27 @@ func NewModelService() *ModelService {
 	return &ModelService{}
 }
 
-func (s *ModelService) ListModels(context.Context, model.ModelListRequest) (model.ModelListResponse, error) {
+func (s *ModelService) ListModels(_ context.Context, request model.ModelListRequest) (model.ModelListResponse, error) {
+	if _, err := normalizeModelKind(request.Type); err != nil {
+		return model.ModelListResponse{}, err
+	}
 	return model.ModelListResponse{}, nil
 }
 
-func (s *ModelService) Probe(context.Context, model.ModelProbeRequest, int) (model.ModelProbeResponse, error) {
+func (s *ModelService) Probe(_ context.Context, request model.ModelProbeRequest, _ int) (model.ModelProbeResponse, error) {
+	if _, err := normalizeModelKind(request.Type); err != nil {
+		return model.ModelProbeResponse{}, err
+	}
 	return model.ModelProbeResponse{}, nil
+}
+
+func normalizeModelKind(kind model.ModelKind) (model.ModelKind, error) {
+	switch kind {
+	case model.ModelKindChat, model.ModelKindEmbedding:
+		return kind, nil
+	default:
+		return "", fmt.Errorf("unsupported model type")
+	}
 }
 
 func normalizeModelProvider(provider string) (string, error) {
@@ -47,7 +62,13 @@ func normalizeModelEndpoint(provider, baseURL string) (normalizedProvider, norma
 	}
 
 	parsed, err := url.Parse(strings.TrimRight(strings.TrimSpace(baseURL), "/"))
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+	if err != nil {
+		return "", "", fmt.Errorf("invalid model endpoint URL")
+	}
+	if parsed.User != nil {
+		return "", "", fmt.Errorf("invalid model endpoint URL")
+	}
+	if parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return "", "", fmt.Errorf("invalid model endpoint URL")
 	}
 

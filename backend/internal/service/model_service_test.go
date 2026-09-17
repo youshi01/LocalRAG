@@ -1,6 +1,12 @@
 package service
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"localrag/internal/model"
+)
 
 func TestNormalizeModelEndpoint(t *testing.T) {
 	cases := []struct {
@@ -43,5 +49,37 @@ func TestNormalizeModelProviderAcceptsLegacyOpenAIName(t *testing.T) {
 	}
 	if provider != "openai-compatible" {
 		t.Fatalf("expected openai-compatible, got %q", provider)
+	}
+}
+
+func TestNormalizeModelEndpointRejectsUserInfoWithoutLeakingSecret(t *testing.T) {
+	const secret = "endpoint-secret"
+
+	_, _, err := normalizeModelEndpoint("ollama", "http://user:"+secret+"@127.0.0.1:11434/v1")
+	if err == nil {
+		t.Fatal("expected userinfo endpoint validation error")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("endpoint validation error leaked secret: %q", err)
+	}
+}
+
+func TestNormalizeModelKindRejectsUnsupportedValues(t *testing.T) {
+	for _, kind := range []model.ModelKind{"audio", "invalid"} {
+		if _, err := normalizeModelKind(kind); err == nil {
+			t.Fatalf("expected model kind %q validation error", kind)
+		}
+	}
+}
+
+func TestModelServiceRejectsUnsupportedModelKinds(t *testing.T) {
+	service := NewModelService()
+	for _, kind := range []model.ModelKind{"audio", "invalid"} {
+		if _, err := service.ListModels(context.Background(), model.ModelListRequest{Type: kind}); err == nil {
+			t.Fatalf("expected ListModels to reject model kind %q", kind)
+		}
+		if _, err := service.Probe(context.Background(), model.ModelProbeRequest{Type: kind}, 0); err == nil {
+			t.Fatalf("expected Probe to reject model kind %q", kind)
+		}
 	}
 }

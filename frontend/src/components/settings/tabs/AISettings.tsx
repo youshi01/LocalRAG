@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import type { AppConfig, ChatConfig, ChatModeSettings, EmbeddingConfig } from '../../../App'
 import AppIcon from '../../common/AppIcon'
 import { ModelConfigTest } from '../ModelConfigProbe'
+import { getEmbeddingGuide } from '../embeddingGuide'
 
 interface AISettingsProps {
   config: AppConfig
@@ -24,6 +25,7 @@ const AISettings: React.FC<AISettingsProps> = ({
   onThinkModelChange,
 }) => {
   const [activeSection, setActiveSection] = useState<ModelSection>('chat')
+  const embeddingGuide = getEmbeddingGuide(config.embedding.provider)
 
   return (
     <div className="settings-tab-content settings-models-page">
@@ -219,7 +221,7 @@ const AISettings: React.FC<AISettingsProps> = ({
           <section className="settings-form-section">
             <header>
               <h4>连接</h4>
-              <p>Embedding 服务地址、模型和凭据。</p>
+              <p>Embedding 服务地址、模型和凭据。Embedding 可以来自公网、公司内网或本机服务。</p>
             </header>
             <div className="settings-form-grid settings-form-grid-dense">
               <div className="settings-form-group">
@@ -279,6 +281,35 @@ const AISettings: React.FC<AISettingsProps> = ({
               </div>
             </div>
           </section>
+
+          <aside className="settings-embedding-guide" aria-label="Embedding 配置说明">
+            <div className="settings-embedding-guide-header">
+              <div>
+                <h4>Embedding 能力说明</h4>
+                <span>{embeddingGuide.protocol} · {embeddingGuide.endpoint}</span>
+              </div>
+              <span className="settings-status-pill neutral">按协议探测</span>
+            </div>
+            <dl className="settings-embedding-guide-grid">
+              <div>
+                <dt className="settings-embedding-guide-label">可用平台</dt>
+                <dd>{embeddingGuide.platforms}</dd>
+              </div>
+              <div>
+                <dt className="settings-embedding-guide-label">Base URL 示例</dt>
+                <dd><code>{embeddingGuide.baseUrlExample}</code>，不要填写完整的 embeddings 路径。</dd>
+              </div>
+              <div>
+                <dt className="settings-embedding-guide-label">模型选择</dt>
+                <dd>{embeddingGuide.modelRule}</dd>
+              </div>
+              <div>
+                <dt className="settings-embedding-guide-label">索引要求</dt>
+                <dd>{embeddingGuide.dimensionRule}</dd>
+              </div>
+            </dl>
+            <p className="settings-embedding-guide-note">{embeddingGuide.serverNote}</p>
+          </aside>
 
           <div className="settings-test-row">
             <div>

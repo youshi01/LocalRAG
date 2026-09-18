@@ -308,6 +308,80 @@
   line-height: 1.4;
 }
 
+.settings-embedding-guide {
+  margin: var(--space-4) 0;
+  padding: var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--bg-secondary) 58%, var(--bg-primary));
+}
+
+.settings-embedding-guide-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.settings-embedding-guide-header h4,
+.settings-embedding-guide-header span {
+  display: block;
+}
+
+.settings-embedding-guide-header h4 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.settings-embedding-guide-header div > span {
+  margin-top: var(--space-1);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.settings-embedding-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-4);
+}
+
+.settings-embedding-guide-grid > div {
+  min-width: 0;
+}
+
+.settings-embedding-guide-label {
+  display: block;
+  margin-bottom: var(--space-1);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+
+.settings-embedding-guide dd,
+.settings-embedding-guide-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.settings-embedding-guide code {
+  padding: 0.1em 0.35em;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-tertiary) 72%, var(--bg-primary));
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+}
+
+.settings-embedding-guide-note {
+  margin-top: var(--space-3) !important;
+  padding-top: var(--space-3);
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 48%, transparent);
+}
+
 .settings-secret-input-row {
   display: flex;
   align-items: center;
@@ -2639,6 +2713,10 @@
   }
 
   .settings-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-embedding-guide-grid {
     grid-template-columns: 1fr;
   }
 

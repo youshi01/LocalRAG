@@ -341,6 +341,50 @@
   font-size: var(--text-xs);
 }
 
+.settings-embedding-guide-intro {
+  margin: 0 0 var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.settings-embedding-guide-recommendations {
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-tertiary) 44%, var(--bg-primary));
+}
+
+.settings-embedding-guide-recommendations ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin: var(--space-2) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-embedding-guide-recommendations li {
+  min-width: 0;
+}
+
+.settings-embedding-guide-recommendations li strong,
+.settings-embedding-guide-recommendations li span {
+  display: block;
+}
+
+.settings-embedding-guide-recommendations li strong {
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+}
+
+.settings-embedding-guide-recommendations li span,
+.settings-embedding-guide-recommendations small {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
 .settings-embedding-guide-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2717,6 +2761,10 @@
   }
 
   .settings-embedding-guide-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-embedding-guide-recommendations ul {
     grid-template-columns: 1fr;
   }
 

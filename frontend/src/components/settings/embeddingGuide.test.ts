@@ -5,12 +5,17 @@ describe('embedding configuration guide', () => {
   it('describes OpenAI Compatible embedding as a protocol, not a vendor lock', () => {
     const guide = getEmbeddingGuide('openai-compatible')
 
+    expect(guide.whatIsEmbedding).toContain('向量')
+    expect(guide.whatIsEmbedding).toContain('知识库')
     expect(guide.endpoint).toBe('POST /v1/embeddings')
     expect(guide.baseUrlExample).toContain('/v1')
     expect(guide.platforms).toContain('vLLM')
     expect(guide.platforms).toContain('公司内部平台')
     expect(guide.modelRule).toContain('Embedding')
     expect(guide.modelRule).toContain('Chat')
+    expect(guide.recommendations.map((item) => item.name)).toEqual(
+      expect.arrayContaining(['nomic-embed-text', 'bge-m3', 'text-embedding-3-small']),
+    )
   })
 
   it('explains Ollama as one protocol while keeping the same capability rules', () => {

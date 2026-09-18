@@ -290,6 +290,19 @@ const AISettings: React.FC<AISettingsProps> = ({
               </div>
               <span className="settings-status-pill neutral">按协议探测</span>
             </div>
+            <p className="settings-embedding-guide-intro">{embeddingGuide.whatIsEmbedding}</p>
+            <div className="settings-embedding-guide-recommendations">
+              <span className="settings-embedding-guide-label">模型推荐方向</span>
+              <ul>
+                {embeddingGuide.recommendations.map((item) => (
+                  <li key={item.name}>
+                    <strong>{item.name}</strong>
+                    <span>{item.description}</span>
+                  </li>
+                ))}
+              </ul>
+              <small>推荐仅用于选型参考，最终以“获取模型”和“探测模型”的实际结果为准。</small>
+            </div>
             <dl className="settings-embedding-guide-grid">
               <div>
                 <dt className="settings-embedding-guide-label">可用平台</dt>

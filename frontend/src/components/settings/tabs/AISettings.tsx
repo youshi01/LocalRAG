@@ -195,8 +195,8 @@ const AISettings: React.FC<AISettingsProps> = ({
 
           <div className="settings-test-row">
             <div>
-              <strong>连接测试</strong>
-              <span>使用当前草稿验证地址、模型和凭据。</span>
+              <strong>获取模型</strong>
+              <span>读取当前协议提供的模型候选，不会下载模型。</span>
             </div>
             <ModelConfigTest
               type="chat"
@@ -207,6 +207,7 @@ const AISettings: React.FC<AISettingsProps> = ({
               apiKeyConfigured={config.chat.apiKeyConfigured}
               clearApiKey={config.chat.clearApiKey}
               temperature={config.chat.temperature}
+              showProbe={false}
               onModelChange={(value) => onChatConfigChange('model', value)}
             />
           </div>

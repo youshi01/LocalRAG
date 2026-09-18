@@ -17,7 +17,7 @@ export interface EmbeddingGuide {
 
 const whatIsEmbedding = 'Embedding 模型会把文本转换成向量，供文档索引和知识库检索使用；它不负责生成聊天答案。'
 const sharedModelRule = '必须选择真正的 Text Embedding 模型；普通 Chat、Instruct 或 Reasoning 模型不一定支持向量化。'
-const sharedDimensionRule = '点击“探测模型”确认输出维度，并确保与 QDRANT_VECTOR_SIZE 一致；更换 Embedding 模型后应重新索引，维度变化时使用新的 QDRANT_COLLECTION_PREFIX。'
+const sharedDimensionRule = '确认服务返回的输出维度，并确保与 QDRANT_VECTOR_SIZE 一致；更换 Embedding 模型后应重新索引，维度变化时使用新的 QDRANT_COLLECTION_PREFIX。'
 const recommendations = [
   { name: 'nomic-embed-text', description: '本地或内网通用文本向量模型，适合入门和低成本部署。' },
   { name: 'bge-m3', description: '多语言和中英文检索常用，适合公司内部知识库。' },

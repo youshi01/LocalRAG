@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -93,6 +94,54 @@ func TestRagServiceEmbedTextsReturnsUpstreamError(t *testing.T) {
 	}
 	if embeddings != nil {
 		t.Fatalf("expected no fabricated embeddings, got %#v", embeddings)
+	}
+}
+
+func TestRagServiceExplainsEmbeddingCapabilityError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"This server does not support embeddings. Start it with --embeddings"}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	embeddings, err := NewRagService().EmbedTexts(t.Context(), model.EmbeddingModelConfig{
+		Provider: "openai-compatible", BaseURL: server.URL, Model: "remote-embedding",
+	}, []string{"示例"}, 3)
+	if err == nil {
+		t.Fatal("expected embedding capability error")
+	}
+	if !strings.Contains(err.Error(), "Embedding 服务未启用向量接口") || !strings.Contains(err.Error(), "--embeddings") {
+		t.Fatalf("expected actionable Chinese embedding capability guidance, got %q", err.Error())
+	}
+	if embeddings != nil {
+		t.Fatalf("expected no fabricated embeddings, got %#v", embeddings)
+	}
+}
+
+func TestRagServiceExplainsNonJSONEmbeddingCapabilityErrors(t *testing.T) {
+	for name, body := range map[string]string{
+		"plain text":   "This endpoint does not support embeddings. Start it with --embeddings",
+		"string error": `{"error":"Embedding endpoint is disabled; enable embeddings"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/plain")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, body)
+			}))
+			t.Cleanup(server.Close)
+
+			embeddings, err := NewRagService().EmbedTexts(t.Context(), model.EmbeddingModelConfig{
+				Provider: "openai-compatible", BaseURL: server.URL, Model: "remote-embedding",
+			}, []string{"示例"}, 3)
+			if err == nil || !strings.Contains(err.Error(), "Embedding 服务未启用向量接口") {
+				t.Fatalf("expected actionable capability guidance, got %v", err)
+			}
+			if embeddings != nil {
+				t.Fatalf("expected no fabricated embeddings, got %#v", embeddings)
+			}
+		})
 	}
 }
 

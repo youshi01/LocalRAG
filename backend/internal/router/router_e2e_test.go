@@ -1954,29 +1954,17 @@ func TestMCPDangerToolsDeleteKnowledgeBaseAndDocument(t *testing.T) {
 	}
 }
 
-func TestRouterRejectSensitiveStructuredUploadWithoutLocalOllama(t *testing.T) {
-	engine, _, cleanup := newTestRouter(t)
+func TestRouterAllowsSensitiveStructuredUploadWithRemoteModels(t *testing.T) {
+	engine, modelBaseURL, cleanup := newTestRouter(t)
 	defer cleanup()
-
-	updatePayload := map[string]any{
-		"chat": map[string]any{
-			"provider":    "openai-compatible",
-			"baseUrl":     "http://chat.example.invalid/v1",
-			"model":       "chat-model-b",
-			"apiKey":      "test-chat-key",
-			"temperature": 0.4,
-		},
-		"embedding": map[string]any{
-			"provider": "openai-compatible",
-			"baseUrl":  "http://embed.example.invalid/v1",
-			"model":    "embed-model-b",
-			"apiKey":   "test-embed-key-2",
-		},
-	}
-	resp := performJSONRequest(t, engine, http.MethodPut, "/api/config", updatePayload)
-	if resp.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d, body=%s", resp.Code, resp.Body.String())
-	}
+	embeddingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/embeddings" {
+			http.Error(w, "unexpected embedding path", http.StatusNotFound)
+			return
+		}
+		handleModelAPI(w, r)
+	}))
+	defer embeddingServer.Close()
 
 	listResp := performRequest(t, engine, http.MethodGet, "/api/knowledge-bases", nil, "")
 	if listResp.Code != http.StatusOK {
@@ -1990,19 +1978,69 @@ func TestRouterRejectSensitiveStructuredUploadWithoutLocalOllama(t *testing.T) {
 		t.Fatal("expected default knowledge base")
 	}
 
+	localUploadResp := performMultipartUpload(
+		t,
+		engine,
+		http.MethodPost,
+		fmt.Sprintf("/api/knowledge-bases/%s/documents", kbList.Items[0].ID),
+		"existing-sensitive.csv",
+		"字段A,字段B\n值1,值2\n",
+	)
+	if localUploadResp.Code != http.StatusOK {
+		t.Fatalf("expected initial local upload status 200, got %d, body=%s", localUploadResp.Code, localUploadResp.Body.String())
+	}
+
+	updatePayload := map[string]any{
+		"chat": map[string]any{
+			"provider":    "openai-compatible",
+			"baseUrl":     modelBaseURL,
+			"model":       "chat-model-b",
+			"apiKey":      "test-chat-key",
+			"temperature": 0.4,
+		},
+		"embedding": map[string]any{
+			"provider": "openai-compatible",
+			"baseUrl":  embeddingServer.URL,
+			"model":    "embed-model-b",
+			"apiKey":   "test-embed-key-2",
+		},
+	}
+	resp := performJSONRequest(t, engine, http.MethodPut, "/api/config", updatePayload)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", resp.Code, resp.Body.String())
+	}
+
 	uploadResp := performMultipartUpload(
 		t,
 		engine,
 		http.MethodPost,
 		fmt.Sprintf("/api/knowledge-bases/%s/documents", kbList.Items[0].ID),
 		"structured-sensitive.csv",
-		"字段A,字段B\n值1,值2\n",
+		"字段A,字段B\n值3,值4\n",
 	)
-	if uploadResp.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d, body=%s", uploadResp.Code, uploadResp.Body.String())
+	if uploadResp.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", uploadResp.Code, uploadResp.Body.String())
 	}
-	if !strings.Contains(uploadResp.Body.String(), "requires local ollama") {
-		t.Fatalf("expected local ollama policy error, got %s", uploadResp.Body.String())
+	var uploadResult model.UploadResponse
+	decodeJSONResponse(t, uploadResp.Body.Bytes(), &uploadResult)
+	if uploadResult.Uploaded.Status != "indexed" {
+		t.Fatalf("expected remote embedding upload to be indexed, got %#v", uploadResult.Uploaded)
+	}
+
+	chatResp := performJSONRequest(t, engine, http.MethodPost, "/v1/chat/completions", map[string]any{
+		"conversationId": "remote-chat-1",
+		"model":          "chat-model-b",
+		"config": map[string]any{
+			"provider":    "openai-compatible",
+			"baseUrl":     modelBaseURL,
+			"model":       "chat-model-b",
+			"apiKey":      "test-chat-key",
+			"temperature": 0.4,
+		},
+		"messages": []map[string]string{{"role": "user", "content": "你好"}},
+	})
+	if chatResp.Code != http.StatusOK {
+		t.Fatalf("expected independent remote chat status 200, got %d, body=%s", chatResp.Code, chatResp.Body.String())
 	}
 }
 
@@ -2669,7 +2707,7 @@ func handleModelAPI(w http.ResponseWriter, r *http.Request) {
 				{"id": "embedding-test-model", "owned_by": "test"},
 			},
 		})
-	case "/embeddings":
+	case "/embeddings", "/v1/embeddings":
 		var req struct {
 			Input []string `json:"input"`
 		}
@@ -2698,7 +2736,7 @@ func handleModelAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"embeddings": embeddings})
 	// OpenAI-compatible chat
-	case "/chat/completions":
+	case "/chat/completions", "/v1/chat/completions":
 		body, _ := io.ReadAll(r.Body)
 		content := "已基于检索上下文回答：Redis 是高性能内存数据库。"
 		if bytes.Contains(body, []byte("这个文档有多少名员工")) && bytes.Contains(body, []byte("数据行数：4")) {

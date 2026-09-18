@@ -398,6 +398,47 @@ func TestProbeOpenAICompatibleEmbeddingReportsDimensionMismatch(t *testing.T) {
 	}
 }
 
+func TestProbeExplainsEmbeddingCapabilityError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":{"message":"This server does not support embeddings. Start it with --embeddings"}}`)
+	}))
+	t.Cleanup(server.Close)
+
+	result, err := (&ModelService{client: server.Client()}).Probe(t.Context(), model.ModelProbeRequest{
+		Type: model.ModelKindEmbedding, Provider: "openai-compatible", BaseURL: server.URL, Model: "remote-embedding",
+	}, 3)
+	if err != nil {
+		t.Fatalf("probe returned unexpected error: %v", err)
+	}
+	if result.Success || result.ErrorCode != "embedding_not_supported" {
+		t.Fatalf("expected embedding capability failure, got %#v", result)
+	}
+	if !strings.Contains(result.ErrorMessage, "Embedding 服务未启用向量接口") || !strings.Contains(result.ErrorMessage, "--embeddings") {
+		t.Fatalf("expected actionable Chinese embedding capability guidance, got %q", result.ErrorMessage)
+	}
+}
+
+func TestProbeExplainsPlainTextEmbeddingCapabilityError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, "This endpoint does not support embeddings. Start it with --embeddings")
+	}))
+	t.Cleanup(server.Close)
+
+	result, err := (&ModelService{client: server.Client()}).Probe(t.Context(), model.ModelProbeRequest{
+		Type: model.ModelKindEmbedding, Provider: "openai-compatible", BaseURL: server.URL, Model: "remote-embedding",
+	}, 3)
+	if err != nil || result.Success || result.ErrorCode != "embedding_not_supported" {
+		t.Fatalf("expected embedding capability failure, result=%#v err=%v", result, err)
+	}
+	if !strings.Contains(result.ErrorMessage, "Embedding 服务未启用向量接口") {
+		t.Fatalf("expected actionable capability guidance, got %q", result.ErrorMessage)
+	}
+}
+
 func TestProbeMapsHTTP400ModelNotFoundWithOneRequest(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

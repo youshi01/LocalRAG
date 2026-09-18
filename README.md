@@ -193,19 +193,21 @@ Docker Desktop（Windows）中的后端访问宿主机 Ollama 时，Base URL 使
 - **探测模型**：向所选 Chat 或 Embedding 模型发送一次真实请求，并在设置页显示本次请求的 latency（毫秒）。
 - **Embedding 维度**：Embedding 探测会返回实际向量维度；要成功用于索引，该维度必须与 `QDRANT_VECTOR_SIZE` 匹配。不匹配时应调整模型或 Qdrant 配置，并使用新的 `QDRANT_COLLECTION_PREFIX` 后重新索引。
 - **保存行为**：探测仅检查当前表单值，不会自动保存配置；探测失败也不会自动覆盖或写入当前已保存的模型配置。确认配置后，请使用设置页的“保存”按钮。
+- **Chat 与 Embedding 独立**：Embedding 不要求使用本机 Ollama，可以配置公网、公司内网或其他 OpenAI Compatible 服务。能调用 Chat 接口不代表同一服务也提供 Embedding 接口，必要时请为 Chat 和 Embedding 分别配置地址与模型。
+- **Embedding 接口要求**：如果服务返回 `This server does not support embeddings. Start it with --embeddings`，请在该服务启动时启用 embeddings，或把 Embedding 配置改为支持 `/v1/embeddings`（Ollama 使用 `/api/embed`）的服务。
 
 ### OpenAI Compatible 示例
 
 **Chat 配置**
 
-- Provider: `openai`
+- Provider: `openai-compatible`
 - Base URL: 你的兼容接口地址，例如 `https://your-api.example.com/v1`
 - Model: 对应聊天模型名
 - API Key: 对应访问密钥
 
 **Embedding 配置**
 
-- Provider: `openai`
+- Provider: `openai-compatible`
 - Base URL: 你的兼容接口地址
 - Model: 对应嵌入模型名
 - API Key: 对应访问密钥

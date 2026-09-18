@@ -784,7 +784,7 @@ func modelNowRFC3339() string {
 	return util.NowRFC3339()
 }
 
-func validateUploadFileName(fileName string, cfg model.AppConfig) error {
+func validateUploadFileName(fileName string, _ model.AppConfig) error {
 	normalizedName, err := util.NormalizeFilename(fileName)
 	if err != nil {
 		return err
@@ -796,9 +796,6 @@ func validateUploadFileName(fileName string, cfg model.AppConfig) error {
 		".pdf": {},
 	}
 	if service.IsSensitiveStructuredFileExtension(ext) {
-		if !service.IsLocalOllamaConfig(cfg.Chat, cfg.Embedding) {
-			return fmt.Errorf("sensitive structured file type %s requires local ollama for both chat and embedding", ext)
-		}
 		allowed[ext] = struct{}{}
 	}
 	if _, ok := allowed[ext]; !ok {
@@ -810,7 +807,7 @@ func validateUploadFileName(fileName string, cfg model.AppConfig) error {
 	return nil
 }
 
-func validateTextUploadFileName(fileName string, cfg model.AppConfig) error {
+func validateTextUploadFileName(fileName string, _ model.AppConfig) error {
 	normalizedName, err := util.NormalizeFilename(fileName)
 	if err != nil {
 		return err
@@ -826,9 +823,6 @@ func validateTextUploadFileName(fileName string, cfg model.AppConfig) error {
 			return fmt.Errorf("unsupported text upload type: missing extension, allowed types are .txt, .md, .csv")
 		}
 		return fmt.Errorf("unsupported text upload type: %s, allowed types are .txt, .md, .csv", ext)
-	}
-	if service.IsSensitiveStructuredFileExtension(ext) && !service.IsLocalOllamaConfig(cfg.Chat, cfg.Embedding) {
-		return fmt.Errorf("sensitive structured file type %s requires local ollama for both chat and embedding", ext)
 	}
 	return nil
 }

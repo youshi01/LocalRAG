@@ -416,12 +416,16 @@ func readProbeErrorText(reader io.Reader) string {
 	if err != nil || len(body) > modelDiscoveryMaxBodyBytes {
 		return ""
 	}
+	raw := strings.TrimSpace(string(body))
+	if raw == "" {
+		return ""
+	}
 	var payload struct {
 		Error   json.RawMessage `json:"error"`
 		Message string          `json:"message"`
 	}
 	if json.Unmarshal(body, &payload) != nil {
-		return ""
+		return raw
 	}
 	if len(payload.Error) > 0 {
 		var text string
@@ -443,6 +447,9 @@ func classifyProbeStatus(status int, responseText string) error {
 		return probeError("authentication_failed", "模型服务鉴权失败")
 	}
 	text := strings.ToLower(responseText)
+	if isEmbeddingCapabilityError(text) {
+		return probeError("embedding_not_supported", embeddingCapabilityGuidance)
+	}
 	if strings.Contains(text, "model") && (strings.Contains(text, "not found") || strings.Contains(text, "does not exist")) {
 		return probeError("model_not_found", "指定模型不存在")
 	}

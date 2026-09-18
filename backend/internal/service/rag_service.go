@@ -438,6 +438,59 @@ func (s *RagService) EmbedTexts(ctx context.Context, cfg model.EmbeddingModelCon
 	return all, nil
 }
 
+const embeddingCapabilityGuidance = "当前 Embedding 服务未启用向量接口，请启动服务时增加 --embeddings，或将 Embedding 单独配置为支持 /v1/embeddings（Ollama 使用 /api/embed）的服务"
+
+func isEmbeddingCapabilityError(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if strings.Contains(lower, "--embeddings") {
+		return true
+	}
+	return strings.Contains(lower, "embedding") &&
+		(strings.Contains(lower, "does not support") ||
+			strings.Contains(lower, "not supported") ||
+			strings.Contains(lower, "not enabled") ||
+			strings.Contains(lower, "disabled") ||
+			strings.Contains(lower, "unsupported"))
+}
+
+func formatEmbeddingUpstreamError(message string) string {
+	if isEmbeddingCapabilityError(message) {
+		return embeddingCapabilityGuidance
+	}
+	return message
+}
+
+func extractEmbeddingErrorMessage(body []byte) string {
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return ""
+	}
+	if len(trimmed) > 4096 {
+		trimmed = trimmed[:4096]
+	}
+
+	var payload struct {
+		Error   json.RawMessage `json:"error"`
+		Message string          `json:"message"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return trimmed
+	}
+	if len(payload.Error) > 0 {
+		var text string
+		if err := json.Unmarshal(payload.Error, &text); err == nil && strings.TrimSpace(text) != "" {
+			return strings.TrimSpace(text)
+		}
+		var details struct {
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(payload.Error, &details); err == nil && strings.TrimSpace(details.Message) != "" {
+			return strings.TrimSpace(details.Message)
+		}
+	}
+	return strings.TrimSpace(payload.Message)
+}
+
 func normalizeEmbeddingRuntimeConfig(cfg model.EmbeddingModelConfig) (model.EmbeddingModelConfig, error) {
 	cfg.Provider = strings.TrimSpace(cfg.Provider)
 	if cfg.Provider == "" {
@@ -766,16 +819,17 @@ func (s *RagService) requestOllamaEmbeddings(ctx context.Context, cfg model.Embe
 	if err != nil {
 		return nil, fmt.Errorf("read embeddings response: %w", err)
 	}
+	if resp.StatusCode >= http.StatusBadRequest {
+		message := extractEmbeddingErrorMessage(body)
+		if message != "" {
+			return nil, fmt.Errorf("embeddings api error: %s", formatEmbeddingUpstreamError(message))
+		}
+		return nil, fmt.Errorf("embeddings api error: http %d", resp.StatusCode)
+	}
 
 	var ollamaResp ollamaEmbedResponse
 	if err := json.Unmarshal(body, &ollamaResp); err != nil {
 		return nil, fmt.Errorf("invalid embeddings response: %w", err)
-	}
-	if resp.StatusCode >= http.StatusBadRequest {
-		if strings.TrimSpace(ollamaResp.Error) != "" {
-			return nil, fmt.Errorf("embeddings api error: %s", ollamaResp.Error)
-		}
-		return nil, fmt.Errorf("embeddings api error: http %d", resp.StatusCode)
 	}
 
 	if len(ollamaResp.Embeddings) == 0 {
@@ -817,16 +871,17 @@ func (s *RagService) requestOpenAIEmbeddings(ctx context.Context, cfg model.Embe
 	if err != nil {
 		return nil, fmt.Errorf("read embeddings response: %w", err)
 	}
+	if resp.StatusCode >= http.StatusBadRequest {
+		message := extractEmbeddingErrorMessage(body)
+		if message != "" {
+			return nil, fmt.Errorf("embeddings api error: %s", formatEmbeddingUpstreamError(message))
+		}
+		return nil, fmt.Errorf("embeddings api error: http %d", resp.StatusCode)
+	}
 
 	var embeddingResp openAIEmbeddingResponse
 	if err := json.Unmarshal(body, &embeddingResp); err != nil {
 		return nil, fmt.Errorf("invalid embeddings response: %w", err)
-	}
-	if resp.StatusCode >= http.StatusBadRequest {
-		if embeddingResp.Error != nil && strings.TrimSpace(embeddingResp.Error.Message) != "" {
-			return nil, fmt.Errorf("embeddings api error: %s", embeddingResp.Error.Message)
-		}
-		return nil, fmt.Errorf("embeddings api error: http %d", resp.StatusCode)
 	}
 
 	vectors := make([][]float64, len(embeddingResp.Data))

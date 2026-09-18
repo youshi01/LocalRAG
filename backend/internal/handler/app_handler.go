@@ -1030,7 +1030,7 @@ func (h *AppHandler) uploadFileFromRequest(c *gin.Context) (*multipart.FileHeade
 	return file, true
 }
 
-func validateUploadFile(file *multipart.FileHeader, cfg model.AppConfig, maxUploadBytes int64) error {
+func validateUploadFile(file *multipart.FileHeader, _ model.AppConfig, maxUploadBytes int64) error {
 	if file == nil {
 		return fmt.Errorf("missing file field 'file'")
 	}
@@ -1052,9 +1052,6 @@ func validateUploadFile(file *multipart.FileHeader, cfg model.AppConfig, maxUplo
 		".pdf": {},
 	}
 	if service.IsSensitiveStructuredFileExtension(ext) {
-		if !service.IsLocalOllamaConfig(cfg.Chat, cfg.Embedding) {
-			return errSensitiveStructuredFileRequiresLocalOllama(ext)
-		}
 		allowed[ext] = struct{}{}
 	}
 
@@ -1100,10 +1097,6 @@ func errUnsupportedFileType(ext string) error {
 	}
 
 	return &fileTypeError{Extension: ext}
-}
-
-func errSensitiveStructuredFileRequiresLocalOllama(ext string) error {
-	return fmt.Errorf("sensitive structured file type %s requires local ollama for both chat and embedding", ext)
 }
 
 type fileTypeError struct {

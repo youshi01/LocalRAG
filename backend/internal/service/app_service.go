@@ -3942,7 +3942,7 @@ func cloneMCPJob(job model.MCPJob) model.MCPJob {
 	return job
 }
 
-func validateMCPJobTextFileName(fileName string, cfg model.AppConfig) error {
+func validateMCPJobTextFileName(fileName string, _ model.AppConfig) error {
 	normalizedName, err := util.NormalizeFilename(fileName)
 	if err != nil {
 		return err
@@ -3959,9 +3959,6 @@ func validateMCPJobTextFileName(fileName string, cfg model.AppConfig) error {
 		}
 		return fmt.Errorf("unsupported text upload type: %s, allowed types are .txt, .md, .csv", ext)
 	}
-	if IsSensitiveStructuredFileExtension(ext) && !IsLocalOllamaConfig(cfg.Chat, cfg.Embedding) {
-		return fmt.Errorf("sensitive structured file type %s requires local ollama for both chat and embedding", ext)
-	}
 	return nil
 }
 
@@ -3972,27 +3969,6 @@ func IsSensitiveStructuredFileExtension(ext string) bool {
 	default:
 		return false
 	}
-}
-
-func IsLocalOllamaConfig(chat model.ChatConfig, embedding model.EmbeddingConfig) bool {
-	return strings.EqualFold(strings.TrimSpace(chat.Provider), "ollama") && strings.EqualFold(strings.TrimSpace(embedding.Provider), "ollama")
-}
-
-func (s *AppService) hasSensitiveStructuredDocuments() bool {
-	if s == nil || s.state == nil {
-		return false
-	}
-
-	s.state.Mu.RLock()
-	defer s.state.Mu.RUnlock()
-	for _, kb := range s.state.KnowledgeBases {
-		for _, document := range kb.Documents {
-			if IsSensitiveStructuredFileExtension(filepath.Ext(document.Name)) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func (s *AppService) defaultBaseURL(provider string) string {
@@ -4129,10 +4105,6 @@ func (s *AppService) UpdateConfig(req model.ConfigUpdateRequest) (model.AppConfi
 	if err := validateRetrievalConfig(nextConfig.Retrieval); err != nil {
 		return model.AppConfig{}, err
 	}
-	if s.hasSensitiveStructuredDocuments() && !IsLocalOllamaConfig(nextConfig.Chat, nextConfig.Embedding) {
-		return model.AppConfig{}, fmt.Errorf("sensitive structured documents require local ollama for both chat and embedding")
-	}
-
 	s.state.Mu.Lock()
 	s.state.Config = nextConfig
 	s.state.Mu.Unlock()

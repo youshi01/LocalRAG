@@ -15,6 +15,22 @@ type sensitiveMCPAppService struct {
 	health model.KnowledgeBaseHealthResponse
 }
 
+func TestStructuredUploadValidationAllowsRemoteEmbeddingConfig(t *testing.T) {
+	cfg := model.AppConfig{
+		Chat:      model.ChatConfig{Provider: "openai-compatible", BaseURL: "https://chat.example.test/v1", Model: "chat-model"},
+		Embedding: model.EmbeddingConfig{Provider: "openai-compatible", BaseURL: "https://embed.example.test/v1", Model: "embedding-model"},
+	}
+
+	for _, fileName := range []string{"structured.csv", "structured.xlsx"} {
+		if err := validateUploadFileName(fileName, cfg); err != nil {
+			t.Fatalf("expected remote model config to allow %s, got %v", fileName, err)
+		}
+	}
+	if err := validateTextUploadFileName("structured.csv", cfg); err != nil {
+		t.Fatalf("expected remote model config to allow MCP CSV upload, got %v", err)
+	}
+}
+
 func (s sensitiveMCPAppService) GetDocumentDetail(string, string, string) (model.DocumentDetailResponse, error) {
 	return s.detail, nil
 }

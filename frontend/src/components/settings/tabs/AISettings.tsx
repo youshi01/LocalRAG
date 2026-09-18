@@ -282,6 +282,24 @@ const AISettings: React.FC<AISettingsProps> = ({
             </div>
           </section>
 
+          <div className="settings-test-row">
+            <div>
+              <strong>获取模型</strong>
+              <span>读取当前协议提供的模型候选，不会下载模型。</span>
+            </div>
+            <ModelConfigTest
+              type="embedding"
+              provider={config.embedding.provider}
+              baseUrl={config.embedding.baseUrl}
+              modelName={config.embedding.model}
+              apiKey={config.embedding.apiKey}
+              apiKeyConfigured={config.embedding.apiKeyConfigured}
+              clearApiKey={config.embedding.clearApiKey}
+              showProbe={false}
+              onModelChange={(value) => onEmbeddingConfigChange('model', value)}
+            />
+          </div>
+
           <aside className="settings-embedding-guide" aria-label="Embedding 配置说明">
             <div className="settings-embedding-guide-header">
               <div>
@@ -301,7 +319,7 @@ const AISettings: React.FC<AISettingsProps> = ({
                   </li>
                 ))}
               </ul>
-              <small>推荐仅用于选型参考，最终以“获取模型”和“探测模型”的实际结果为准。</small>
+              <small>推荐仅用于选型参考，最终以服务返回的 Embedding 能力和向量维度为准。</small>
             </div>
             <dl className="settings-embedding-guide-grid">
               <div>
@@ -324,22 +342,6 @@ const AISettings: React.FC<AISettingsProps> = ({
             <p className="settings-embedding-guide-note">{embeddingGuide.serverNote}</p>
           </aside>
 
-          <div className="settings-test-row">
-            <div>
-              <strong>连接测试</strong>
-              <span>确认当前草稿可以完成向量请求。</span>
-            </div>
-            <ModelConfigTest
-              type="embedding"
-              provider={config.embedding.provider}
-              baseUrl={config.embedding.baseUrl}
-              modelName={config.embedding.model}
-              apiKey={config.embedding.apiKey}
-              apiKeyConfigured={config.embedding.apiKeyConfigured}
-              clearApiKey={config.embedding.clearApiKey}
-              onModelChange={(value) => onEmbeddingConfigChange('model', value)}
-            />
-          </div>
         </section>
       )}
     </div>

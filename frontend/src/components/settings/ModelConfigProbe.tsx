@@ -19,6 +19,7 @@ type ModelConfigTestProps =
       apiKeyConfigured?: boolean
       clearApiKey?: boolean
       temperature: number
+      showProbe?: boolean
       onModelChange: (value: string) => void
     }
   | {
@@ -30,6 +31,7 @@ type ModelConfigTestProps =
       apiKeyConfigured?: boolean
       clearApiKey?: boolean
       temperature?: never
+      showProbe?: boolean
       onModelChange: (value: string) => void
     }
 
@@ -201,14 +203,16 @@ export const ModelConfigTest: React.FC<ModelConfigTestProps> = (props) => {
         >
           {loadingModels ? '获取中...' : '获取模型'}
         </button>
-        <button
-          type="button"
-          className="test-connection-btn"
-          onClick={() => void handleTest()}
-          disabled={!hasRequiredConfig || testing}
-        >
-          {testing ? '探测中...' : '探测模型'}
-        </button>
+        {props.showProbe !== false ? (
+          <button
+            type="button"
+            className="test-connection-btn"
+            onClick={() => void handleTest()}
+            disabled={!hasRequiredConfig || testing}
+          >
+            {testing ? '探测中...' : '探测模型'}
+          </button>
+        ) : null}
       </div>
 
       {availableModels.length > 0 ? (

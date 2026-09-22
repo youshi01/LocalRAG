@@ -127,6 +127,50 @@ func TestListModelsReadsOllamaTagsAndMeasuresLatency(t *testing.T) {
 	}
 }
 
+func TestListModelsPreservesOllamaCapabilitiesForRequestedKind(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"models":[
+      {"name":"chat-model","capabilities":["completion","tools"]},
+      {"name":"embedding-model","capabilities":["embedding"]}
+    ]}`)
+	}))
+	t.Cleanup(server.Close)
+
+	result, err := (&ModelService{client: server.Client()}).ListModels(t.Context(), model.ModelListRequest{
+		Type: model.ModelKindEmbedding, Provider: "ollama", BaseURL: server.URL,
+	})
+	if err != nil || !result.Success || len(result.Models) != 2 {
+		t.Fatalf("list models: result=%#v err=%v", result, err)
+	}
+	byID := map[string]model.ModelOption{}
+	for _, option := range result.Models {
+		byID[option.ID] = option
+	}
+	if byID["embedding-model"].CapabilityStatus != "supported" || len(byID["embedding-model"].Capabilities) != 1 {
+		t.Fatalf("expected embedding capability to be supported, got %#v", byID["embedding-model"])
+	}
+	if byID["chat-model"].CapabilityStatus != "unsupported" {
+		t.Fatalf("expected chat-only model to be marked unsupported for embedding, got %#v", byID["chat-model"])
+	}
+}
+
+func TestListModelsMarksOpenAICompatibleCapabilitiesUnknownWhenAbsent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"data":[{"id":"remote-model","owned_by":"internal"}]}`)
+	}))
+	t.Cleanup(server.Close)
+
+	result, err := (&ModelService{client: server.Client()}).ListModels(t.Context(), model.ModelListRequest{
+		Type: model.ModelKindEmbedding, Provider: "openai-compatible", BaseURL: server.URL,
+	})
+	if err != nil || !result.Success || len(result.Models) != 1 {
+		t.Fatalf("list models: result=%#v err=%v", result, err)
+	}
+	if result.Models[0].CapabilityStatus != "unknown" {
+		t.Fatalf("expected unknown capability status, got %#v", result.Models[0])
+	}
+}
+
 func TestListModelsReadsOpenAIModelsWithBearerToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/models" || r.Header.Get("Authorization") != "Bearer discovery-secret" {

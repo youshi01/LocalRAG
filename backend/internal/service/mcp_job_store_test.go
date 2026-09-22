@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +24,23 @@ func newTestMCPJobStore(t *testing.T) *MCPJobStore {
 		}
 	})
 	return store
+}
+
+func assertPrivateMCPJobFileMode(t *testing.T, path string) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat protected mcp job store file %s: %v", path, err)
+	}
+	if runtime.GOOS == "windows" {
+		// Windows does not expose Unix permission bits through os.FileMode.
+		// The production path still runs protectFiles; ACL verification belongs
+		// in a Windows security integration test.
+		return
+	}
+	if got := info.Mode().Perm(); got != mcpJobStorePrivateMode {
+		t.Fatalf("expected mcp job store mode 0600, got %04o", got)
+	}
 }
 
 func resetMCPJobForCheckpointReplay(store *MCPJobStore, record mcpJobStoreRecord) error {
@@ -107,13 +125,7 @@ func TestMCPJobStorePersistsAndSanitizesJobRecord(t *testing.T) {
 
 func TestMCPJobStorePersistsBatchInputMetadataAndProtectsFile(t *testing.T) {
 	store := newTestMCPJobStore(t)
-	info, err := os.Stat(store.Path())
-	if err != nil {
-		t.Fatalf("stat mcp job store: %v", err)
-	}
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("expected mcp job store mode 0600, got %04o", got)
-	}
+	assertPrivateMCPJobFileMode(t, store.Path())
 
 	record := testMCPJobRecord("job-batch-input-metadata", time.Now().UTC())
 	record.Job.Type = "batch-index"
@@ -166,13 +178,7 @@ func TestMCPJobStoreProtectsDatabaseAndSQLiteSidecarsAfterWrite(t *testing.T) {
 	if err := store.Create(testMCPJobRecord("job-protected-write", time.Now().UTC())); err != nil {
 		t.Fatalf("create job after relaxing mode: %v", err)
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat protected mcp job store: %v", err)
-	}
-	if got := info.Mode().Perm(); got != mcpJobStorePrivateMode {
-		t.Fatalf("expected write to restore database mode %04o, got %04o", mcpJobStorePrivateMode, got)
-	}
+	assertPrivateMCPJobFileMode(t, path)
 
 	if err := store.Close(); err != nil {
 		t.Fatalf("close mcp job store before sidecar check: %v", err)
@@ -187,13 +193,7 @@ func TestMCPJobStoreProtectsDatabaseAndSQLiteSidecarsAfterWrite(t *testing.T) {
 		t.Fatalf("protect sqlite sidecars: %v", err)
 	}
 	for _, suffix := range []string{"", "-wal", "-shm"} {
-		info, err := os.Stat(path + suffix)
-		if err != nil {
-			t.Fatalf("stat protected sqlite file %s: %v", suffix, err)
-		}
-		if got := info.Mode().Perm(); got != mcpJobStorePrivateMode {
-			t.Fatalf("expected sqlite file %s mode %04o, got %04o", suffix, mcpJobStorePrivateMode, got)
-		}
+		assertPrivateMCPJobFileMode(t, path+suffix)
 	}
 }
 

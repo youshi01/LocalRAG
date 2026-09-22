@@ -43,7 +43,7 @@ services:
     pids_limit: ${QDRANT_PIDS_LIMIT:-512}
 
   backend:
-    image: ghcr.io/youshi01/localrag-backend:${LOCALRAG_IMAGE_TAG:-${AI_LOCALBASE_IMAGE_TAG:-v1.4.6}}
+    image: ghcr.io/youshi01/localrag-backend:${LOCALRAG_IMAGE_TAG:-${AI_LOCALBASE_IMAGE_TAG:-latest}}
     container_name: localrag-backend
     restart: unless-stopped
     ports:
@@ -113,7 +113,7 @@ services:
     pids_limit: ${BACKEND_PIDS_LIMIT:-256}
 
   frontend:
-    image: ghcr.io/youshi01/localrag-frontend:${LOCALRAG_IMAGE_TAG:-${AI_LOCALBASE_IMAGE_TAG:-v1.4.6}}
+    image: ghcr.io/youshi01/localrag-frontend:${LOCALRAG_IMAGE_TAG:-${AI_LOCALBASE_IMAGE_TAG:-latest}}
     container_name: localrag-frontend
     restart: unless-stopped
     ports:

@@ -206,8 +206,6 @@ const AISettings: React.FC<AISettingsProps> = ({
               apiKey={config.chat.apiKey}
               apiKeyConfigured={config.chat.apiKeyConfigured}
               clearApiKey={config.chat.clearApiKey}
-              temperature={config.chat.temperature}
-              showProbe={false}
               onModelChange={(value) => onChatConfigChange('model', value)}
             />
           </div>
@@ -296,7 +294,6 @@ const AISettings: React.FC<AISettingsProps> = ({
               apiKey={config.embedding.apiKey}
               apiKeyConfigured={config.embedding.apiKeyConfigured}
               clearApiKey={config.embedding.clearApiKey}
-              showProbe={false}
               onModelChange={(value) => onEmbeddingConfigChange('model', value)}
             />
           </div>
@@ -307,7 +304,7 @@ const AISettings: React.FC<AISettingsProps> = ({
                 <h4>Embedding 能力说明</h4>
                 <span>{embeddingGuide.protocol} · {embeddingGuide.endpoint}</span>
               </div>
-              <span className="settings-status-pill neutral">按协议探测</span>
+              <span className="settings-status-pill neutral">按协议识别</span>
             </div>
             <p className="settings-embedding-guide-intro">{embeddingGuide.whatIsEmbedding}</p>
             <div className="settings-embedding-guide-recommendations">

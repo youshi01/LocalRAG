@@ -62,6 +62,7 @@ type persistedDocument struct {
 	IndexedContentAvailable bool   `json:"indexedContentAvailable,omitempty"`
 	IndexedContentChars     int    `json:"indexedContentChars,omitempty"`
 	IndexedTablesCount      int    `json:"indexedTablesCount,omitempty"`
+	EmbeddingFingerprint    string `json:"embeddingFingerprint,omitempty"`
 	IndexFence              string `json:"indexFence,omitempty"`
 	IndexOperationFence     string `json:"indexOperationFence,omitempty"`
 	IndexOperationOwner     string `json:"indexOperationOwner,omitempty"`
@@ -200,6 +201,7 @@ func persistedDocumentFromModel(document model.Document) persistedDocument {
 		IndexedContentAvailable: document.IndexedContentAvailable,
 		IndexedContentChars:     document.IndexedContentChars,
 		IndexedTablesCount:      document.IndexedTablesCount,
+		EmbeddingFingerprint:    strings.TrimSpace(document.EmbeddingFingerprint),
 		IndexFence:              strings.TrimSpace(document.IndexFence),
 		IndexOperationFence:     strings.TrimSpace(document.IndexOperationFence),
 		IndexOperationOwner:     strings.TrimSpace(document.IndexOperationOwner),
@@ -230,6 +232,7 @@ func documentToModel(document persistedDocument) model.Document {
 		IndexedContentAvailable: document.IndexedContentAvailable,
 		IndexedContentChars:     document.IndexedContentChars,
 		IndexedTablesCount:      document.IndexedTablesCount,
+		EmbeddingFingerprint:    strings.TrimSpace(document.EmbeddingFingerprint),
 		IndexFence:              strings.TrimSpace(document.IndexFence),
 		IndexOperationFence:     strings.TrimSpace(document.IndexOperationFence),
 		IndexOperationOwner:     strings.TrimSpace(document.IndexOperationOwner),

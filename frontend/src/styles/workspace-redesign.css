@@ -1815,6 +1815,11 @@ body,
   color: var(--color-error);
 }
 
+.settings-save-bar.has-warning .settings-save-state-icon {
+  background: var(--color-warning-light);
+  color: var(--color-warning);
+}
+
 .settings-save-state > span:last-child {
   display: grid;
   min-width: 0;

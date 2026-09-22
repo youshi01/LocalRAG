@@ -110,7 +110,7 @@ Docker 自托管建议设置：
 
 生产 Compose 已配置容器自动重启、日志轮转和资源上限。后端业务进程以非 root 用户运行，首次启动会自动修正持久化数据目录的文件属主并写入迁移标记；相关资源变量见 [`DOCKER_DEPLOY.md`](DOCKER_DEPLOY.md)。如果外层还有受控 HTTPS 反向代理，请设置 `TRUST_EXTERNAL_PROXY_HEADERS=true` 并保留 `X-Forwarded-Proto` 和 `X-Forwarded-Host`；前端端口直接暴露时保持默认值 `false`。
 
-当前应用层按**单实例**设计：本地 SQLite 聊天记录、应用状态文件和内存中的 MCP Job 不支持多个后端副本共享写入。生产 Compose 默认使用已发布的固定 `v1.4.6` 镜像版本，升级或回滚时通过 `LOCALRAG_IMAGE_TAG` 显式切换；本地源码修改请使用开发或本地构建编排验证，不要直接依赖 `latest`，也不要使用 `docker compose scale backend=2`。
+当前应用层按**单实例**设计：本地 SQLite 聊天记录、应用状态文件和内存中的 MCP Job 不支持多个后端副本共享写入。生产 Compose 默认使用 `latest` 镜像；需要可回滚部署时通过 `LOCALRAG_IMAGE_TAG` 显式固定具体版本或 commit tag。本地源码修改请使用开发或本地构建编排验证，也不要使用 `docker compose scale backend=2`。
 
 默认数据目录由 `.env` 控制，主要包括上传文件、应用状态、聊天 SQLite 数据库和 Qdrant 持久化目录。升级或迁移前建议先备份这些路径，详见 [`docs/backup-restore.md`](docs/backup-restore.md)。
 
@@ -119,7 +119,7 @@ Docker 自托管建议设置：
 如果不想本地编译，可直接使用预构建镜像：
 
 ```bash
-LOCALRAG_IMAGE_TAG=v1.4.6 docker compose -f docker-compose.prod.yml up -d
+LOCALRAG_IMAGE_TAG=latest docker compose -f docker-compose.prod.yml up -d
 ```
 
 生产 Compose 在未提供 `ENABLE_AUTH` 时默认开启认证；如果使用 `.env.example`，请在启动前确认 `ENABLE_AUTH=true`，并设置 `AUTH_PASSWORD` 或 `AUTH_SETUP_TOKEN`。后端默认只绑定宿主机本机，浏览器通过前端 `4173` 端口访问；如确需直接访问后端，再显式设置 `BACKEND_BIND_ADDRESS=0.0.0.0`。
@@ -190,9 +190,10 @@ Docker Desktop（Windows）中的后端访问宿主机 Ollama 时，Base URL 使
 也可以填写以 `/v1` 结尾的地址；后端会统一规范化为所需的 `/v1` 基址。
 
 - **获取模型**：向当前 Provider 读取可用模型候选列表，不会下载模型；请先在 Ollama 或对应 Provider 中安装/提供模型。
-- **探测模型**：向所选 Chat 或 Embedding 模型发送一次真实请求，并在设置页显示本次请求的 latency（毫秒）。
-- **Embedding 维度**：Embedding 探测会返回实际向量维度；要成功用于索引，该维度必须与 `QDRANT_VECTOR_SIZE` 匹配。不匹配时应调整模型或 Qdrant 配置，并使用新的 `QDRANT_COLLECTION_PREFIX` 后重新索引。
-- **保存行为**：探测仅检查当前表单值，不会自动保存配置；探测失败也不会自动覆盖或写入当前已保存的模型配置。确认配置后，请使用设置页的“保存”按钮。
+- **能力标签**：Provider 返回能力元数据时，候选会标记为“能力匹配”或“不支持当前类型”；未提供元数据的 OpenAI Compatible 服务会标记为“能力待确认”，不会被错误过滤。
+- **保存后健康检查**：保存配置后，后台会对 Chat、Embedding、Qdrant 和存储执行健康检查，并在设置底部反馈异常；模型能力最终以真实接口响应为准。
+- **Embedding 维度**：健康检查会验证实际向量维度；要成功用于索引，该维度必须与 `QDRANT_VECTOR_SIZE` 匹配。不匹配时应调整模型或 Qdrant 配置，并使用新的 `QDRANT_COLLECTION_PREFIX` 后重新索引。
+- **Embedding 模型指纹**：更换 Embedding 模型、服务地址或向量维度后，即使维度相同也会标记已有文档需要重新索引，避免新旧向量混用。
 - **Chat 与 Embedding 独立**：Embedding 不要求使用本机 Ollama，可以配置公网、公司内网或其他 OpenAI Compatible 服务。能调用 Chat 接口不代表同一服务也提供 Embedding 接口，必要时请为 Chat 和 Embedding 分别配置地址与模型。
 - **Embedding 接口要求**：如果服务返回 `This server does not support embeddings. Start it with --embeddings`，请在该服务启动时启用 embeddings，或把 Embedding 配置改为支持 `/v1/embeddings`（Ollama 使用 `/api/embed`）的服务。
 

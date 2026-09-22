@@ -204,7 +204,7 @@ embedding request failed: embeddings api error: This server does not support emb
 1. 如果使用同一个 OpenAI Compatible 服务，在服务启动参数中增加 `--embeddings`，并确认它加载的是支持向量化的模型。
 2. 或者在设置页分别配置：Chat 使用当前聊天服务，Embedding 使用公网、公司内网或其他支持 `/v1/embeddings` 的服务。
 3. 如果使用 Ollama，Embedding 请求需要由 Ollama 的 `/api/embed` 接口处理。
-4. 点击设置页的“获取模型”和“探测模型”，确认 Embedding 探测成功，并检查实际向量维度是否等于 `QDRANT_VECTOR_SIZE`。
+4. 点击设置页的“获取模型”选择候选模型并保存；保存后查看设置底部或概览页的健康检查结果，并检查实际向量维度是否等于 `QDRANT_VECTOR_SIZE`。
 
 项目不会再因为 Embedding 不是本机 Ollama 而拒绝 CSV/XLSX；但 Embedding 服务本身仍必须真正支持向量接口。
 

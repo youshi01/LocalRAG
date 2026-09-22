@@ -143,6 +143,13 @@ cp .env.example .env
 docker compose -f docker-compose.dev.yml up --build
 ```
 
+Windows Docker Desktop 若出现 `dockerInference` / `docker-secrets-engine` socket
+错误，建议改用仓库脚本启动，脚本会复用本地镜像并避免重复拉取：
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-docker-localrag.ps1 -Up
+```
+
 默认开发地址：
 
 - 前端：`http://localhost:4173`

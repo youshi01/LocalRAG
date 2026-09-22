@@ -112,7 +112,11 @@ services:
       VITE_DEV_PROXY_TARGET: ${VITE_DEV_PROXY_TARGET:-http://backend:8080}
       VITE_APP_VERSION: ${VITE_APP_VERSION:-}
       CHOKIDAR_USEPOLLING: "true"
-    command: sh -c "npm ci && until wget -qO- http://backend:${PORT:-8080}/readyz >/dev/null 2>&1; do echo 'waiting for backend readiness...'; sleep 2; done && npm run dev -- --host 0.0.0.0 --port 4173"
+    command: >-
+      sh -c "if [ ! -x node_modules/.bin/vite ]; then npm ci; else echo 'using cached frontend node_modules'; fi &&
+      until wget -qO- http://backend:${PORT:-8080}/readyz >/dev/null 2>&1; do
+      echo 'waiting for backend readiness...'; sleep 2; done &&
+      npm run dev -- --host 0.0.0.0 --port 4173"
     ports:
       - "${FRONTEND_PORT:-4173}:4173"
     volumes:

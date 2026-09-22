@@ -270,6 +270,7 @@ func (s *AppService) commitIndexOperation(
 		indexed.IndexOperationFence = ""
 		indexed.IndexOperationOwner = ""
 		indexed.IndexOperationAttempt = 0
+		indexed.EmbeddingFingerprint = s.currentEmbeddingFingerprint()
 		indexed.IndexRunID = record.ID
 		if indexed.Version <= 0 {
 			indexed.Version = current.Version

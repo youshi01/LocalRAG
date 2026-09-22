@@ -26,8 +26,17 @@ export const modelProbeKey = (
   credentialState = '',
 ) => resetModelOptionsKey(type, provider, baseUrl, apiKey, credentialState) + ':' + modelName.trim() + ':' + (temperature ?? '')
 
-export const modelOptionLabel = (option: ModelOption) =>
-  option.owned_by ? option.name + ' · ' + option.owned_by : option.name
+export const modelOptionLabel = (option: ModelOption) => {
+  const ownerLabel = option.owned_by ? ' · ' + option.owned_by : ''
+  const capabilityLabel = option.capability_status === 'supported'
+    ? ' · 能力匹配'
+    : option.capability_status === 'unsupported'
+      ? ' · 不支持当前类型'
+      : option.capability_status === 'unknown'
+        ? ' · 能力待确认'
+        : ''
+  return option.name + ownerLabel + capabilityLabel
+}
 
 export const isCurrentModelDiscoveryRequest = (
   requestKey: string,

@@ -144,6 +144,8 @@ export interface ModelOption {
   name: string
   type: ModelKind
   owned_by: string
+  capabilities?: string[]
+  capability_status?: 'supported' | 'unsupported' | 'unknown' | string
 }
 
 export interface ModelListResponse {

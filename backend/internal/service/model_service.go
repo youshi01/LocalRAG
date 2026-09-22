@@ -77,8 +77,9 @@ func (s *ModelService) ListModels(parent context.Context, request model.ModelLis
 	if normalizedProvider == "ollama" {
 		var payload struct {
 			Models []struct {
-				Name  string `json:"name"`
-				Model string `json:"model"`
+				Name         string   `json:"name"`
+				Model        string   `json:"model"`
+				Capabilities []string `json:"capabilities"`
 			} `json:"models"`
 		}
 		if err := decodeStrictJSON(response.Body, &payload); err != nil {
@@ -98,13 +99,21 @@ func (s *ModelService) ListModels(parent context.Context, request model.ModelLis
 				continue
 			}
 			seen[id] = struct{}{}
-			options = append(options, model.ModelOption{ID: id, Name: id, Type: normalizedType})
+			capabilities := normalizeModelCapabilities(item.Capabilities)
+			options = append(options, model.ModelOption{
+				ID:               id,
+				Name:             id,
+				Type:             normalizedType,
+				Capabilities:     capabilities,
+				CapabilityStatus: modelCapabilityStatus(normalizedType, capabilities),
+			})
 		}
 	} else {
 		var payload struct {
 			Data []struct {
-				ID      string `json:"id"`
-				OwnedBy string `json:"owned_by"`
+				ID           string   `json:"id"`
+				OwnedBy      string   `json:"owned_by"`
+				Capabilities []string `json:"capabilities"`
 			} `json:"data"`
 		}
 		if err := decodeStrictJSON(response.Body, &payload); err != nil {
@@ -121,13 +130,55 @@ func (s *ModelService) ListModels(parent context.Context, request model.ModelLis
 				continue
 			}
 			seen[id] = struct{}{}
-			options = append(options, model.ModelOption{ID: id, Name: id, Type: normalizedType, OwnedBy: strings.TrimSpace(item.OwnedBy)})
+			capabilities := normalizeModelCapabilities(item.Capabilities)
+			options = append(options, model.ModelOption{
+				ID:               id,
+				Name:             id,
+				Type:             normalizedType,
+				OwnedBy:          strings.TrimSpace(item.OwnedBy),
+				Capabilities:     capabilities,
+				CapabilityStatus: modelCapabilityStatus(normalizedType, capabilities),
+			})
 		}
 	}
 	sort.Slice(options, func(i, j int) bool { return options[i].ID < options[j].ID })
 	result.Success = true
 	result.Models = options
 	return result, nil
+}
+
+func normalizeModelCapabilities(capabilities []string) []string {
+	seen := make(map[string]struct{}, len(capabilities))
+	result := make([]string, 0, len(capabilities))
+	for _, capability := range capabilities {
+		capability = strings.ToLower(strings.TrimSpace(capability))
+		if capability == "" {
+			continue
+		}
+		if _, exists := seen[capability]; exists {
+			continue
+		}
+		seen[capability] = struct{}{}
+		result = append(result, capability)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func modelCapabilityStatus(kind model.ModelKind, capabilities []string) string {
+	if len(capabilities) == 0 {
+		return "unknown"
+	}
+	wanted := "completion"
+	if kind == model.ModelKindEmbedding {
+		wanted = "embedding"
+	}
+	for _, capability := range capabilities {
+		if capability == wanted || (kind == model.ModelKindChat && capability == "chat") {
+			return "supported"
+		}
+	}
+	return "unsupported"
 }
 
 func singleAttemptHTTPClient(client *http.Client) *http.Client {

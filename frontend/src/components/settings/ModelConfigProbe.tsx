@@ -224,7 +224,11 @@ export const ModelConfigTest: React.FC<ModelConfigTestProps> = (props) => {
         >
           <option value="">请选择候选模型</option>
           {availableModels.map((option) => (
-            <option key={option.id} value={option.name}>
+            <option
+              key={option.id}
+              value={option.name}
+              disabled={option.capability_status === 'unsupported'}
+            >
               {modelOptionLabel(option)}
             </option>
           ))}

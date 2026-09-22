@@ -7,6 +7,8 @@ import AISettings from './tabs/AISettings'
 import RetrievalSettings from './tabs/RetrievalSettings'
 import MCPSettings from './tabs/MCPSettings'
 import SystemSettings from './tabs/SystemSettings'
+import { fetchHealthSummary } from '../../services/api'
+import { summarizeHealthWarning } from './settingsHealth'
 
 type SettingsTab = 'overview' | 'models' | 'retrieval' | 'access' | 'account'
 
@@ -111,6 +113,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [draftThinkModel, setDraftThinkModel] = useState(chatModeSettings.thinkModel)
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveHealthWarning, setSaveHealthWarning] = useState('')
   const [showDiscardDialog, setShowDiscardDialog] = useState(false)
   const [hasPendingAccessToken, setHasPendingAccessToken] = useState(false)
   const [pendingCredentialDestination, setPendingCredentialDestination] = useState<SettingsTab | 'close' | null>(null)
@@ -133,6 +136,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   const markDraftChanged = useCallback(() => {
     setSaveError(null)
+    setSaveHealthWarning('')
   }, [])
 
   const handleChatConfigChange = useCallback(<K extends keyof ChatConfig>(
@@ -195,6 +199,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     setDraftConfig(baselineConfig)
     setDraftThinkModel(baselineThinkModel)
     setSaveError(null)
+    setSaveHealthWarning('')
   }, [baselineConfig, baselineThinkModel])
 
   const handleSave = useCallback(async () => {
@@ -213,6 +218,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       setDraftConfig(savedConfig)
       setBaselineThinkModel(normalizedThinkModel)
       setDraftThinkModel(normalizedThinkModel)
+      try {
+        const health = await fetchHealthSummary()
+        setSaveHealthWarning(summarizeHealthWarning(health))
+      } catch {
+        setSaveHealthWarning('配置已保存，但健康检查请求未完成，请稍后查看概览。')
+      }
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : '设置保存失败，请稍后重试')
     } finally {
@@ -444,13 +455,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </section>
 
           <footer
-            className={`settings-save-bar ${saveError ? 'has-error' : ''} ${isDirty ? 'is-dirty' : 'is-clean'}`}
+            className={`settings-save-bar ${saveError ? 'has-error' : ''} ${saveHealthWarning ? 'has-warning' : ''} ${isDirty ? 'is-dirty' : 'is-clean'}`}
           >
             <div className="settings-save-state" role="status" aria-live="polite">
               <span className="settings-save-state-icon" aria-hidden="true">
                 <AppIcon
                   className={isSaving ? 'settings-save-spinner' : undefined}
-                  name={saveError ? 'alert' : isSaving ? 'loader' : 'check'}
+                  name={saveError || saveHealthWarning ? 'alert' : isSaving ? 'loader' : 'check'}
                   size={16}
                 />
               </span>
@@ -465,6 +476,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         : '所有更改已保存'}
                 </strong>
                 {saveError && <small>{saveError}</small>}
+                {saveHealthWarning && !saveError && <small>{saveHealthWarning}</small>}
               </span>
             </div>
             <div className="settings-save-actions">

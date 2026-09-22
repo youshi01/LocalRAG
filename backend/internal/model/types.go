@@ -19,10 +19,12 @@ type ModelListRequest struct {
 }
 
 type ModelOption struct {
-	ID      string    `json:"id"`
-	Name    string    `json:"name"`
-	Type    ModelKind `json:"type"`
-	OwnedBy string    `json:"owned_by"`
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	Type             ModelKind `json:"type"`
+	OwnedBy          string    `json:"owned_by"`
+	Capabilities     []string  `json:"capabilities,omitempty"`
+	CapabilityStatus string    `json:"capability_status,omitempty"`
 }
 
 type ModelListResponse struct {
@@ -333,6 +335,7 @@ type Document struct {
 	IndexedContentAvailable bool   `json:"indexedContentAvailable,omitempty"`
 	IndexedContentChars     int    `json:"indexedContentChars,omitempty"`
 	IndexedTablesCount      int    `json:"indexedTablesCount,omitempty"`
+	EmbeddingFingerprint    string `json:"-"`
 	IndexFence              string `json:"-"`
 	// IndexOperationFence identifies the generation currently being built.
 	// These fields are persisted for recovery but hidden from API callers.

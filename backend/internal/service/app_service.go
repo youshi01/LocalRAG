@@ -4410,6 +4410,10 @@ func (s *AppService) buildKnowledgeBaseDocumentHealth(document model.Document) m
 		item.VectorCount = item.ChunkCount
 	}
 	item.NeedsReindex = documentNeedsReindex(document, item)
+	if documentEmbeddingFingerprintNeedsReindex(document, s.currentEmbeddingFingerprint()) {
+		item.NeedsReindex = true
+		item.Recommendation = "Embedding 模型或向量维度已变化，建议重建该文档索引。"
+	}
 	if item.Recommendation == "" {
 		item.Recommendation = documentHealthRecommendation(document, item)
 	}

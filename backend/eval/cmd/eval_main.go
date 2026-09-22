@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -575,7 +576,10 @@ func rewriteEvalPath(path string, rules []evalPathMapRule) string {
 		}
 		prefix := rule.from + "/"
 		if strings.HasPrefix(cleanPath, prefix) {
-			return filepath.Join(rule.to, strings.TrimPrefix(cleanPath, prefix))
+			// Evaluation paths describe container/POSIX locations even when the
+			// evaluator itself runs on Windows. Do not use filepath.Join here:
+			// it would emit backslashes and break the path-map contract.
+			return pathpkg.Join(rule.to, strings.TrimPrefix(cleanPath, prefix))
 		}
 	}
 	return path

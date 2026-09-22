@@ -10,6 +10,7 @@ describe('chat request boundary', () => {
       knowledgeBaseId: 'kb-1',
       documentId: '',
       retrievalMode: 'dense',
+      contentMode: 'full_table',
       config: {
         provider: 'ollama',
         baseUrl: 'http://localhost:11434/v1',
@@ -37,5 +38,6 @@ describe('chat request boundary', () => {
     expect(request.messages).toEqual([{ role: 'user', content: '问题' }])
     expect(request.conversationId).toBe('conversation-1')
     expect(request.config.model).toBe('llama3.2')
+    expect(request.contentMode).toBe('full_table')
   })
 })

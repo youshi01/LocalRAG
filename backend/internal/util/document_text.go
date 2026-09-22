@@ -217,19 +217,15 @@ func extractXLSXText(path string) (string, error) {
 }
 
 func buildDelimitedTableText(fileName, sheetName string, rows [][]string) string {
-	nonEmptyRows := make([][]string, 0, len(rows))
-	for _, row := range rows {
-		if !rowHasContent(row) {
-			continue
-		}
-		nonEmptyRows = append(nonEmptyRows, trimTrailingEmptyCells(row))
-	}
-	if len(nonEmptyRows) == 0 {
+	headers, sourceRows := prepareStructuredRows(rows)
+	if len(headers) == 0 {
 		return ""
 	}
 
-	headers := normalizeTableHeaders(nonEmptyRows[0])
-	dataRows := nonEmptyRows[1:]
+	dataRows := make([][]string, 0, len(sourceRows))
+	for _, sourceRow := range sourceRows {
+		dataRows = append(dataRows, sourceRow.Cells)
+	}
 	builder := &strings.Builder{}
 	if sheetName != "" {
 		fmt.Fprintf(builder, "文件：%s。工作表：%s。字段：%s。数据行数：%d。\n", fileName, sheetName, strings.Join(headers, "、"), len(dataRows))
@@ -243,16 +239,16 @@ func buildDelimitedTableText(fileName, sheetName string, rows [][]string) string
 		builder.WriteString("\n")
 	}
 
-	for index, row := range dataRows {
-		line := buildTableRowLine(headers, row)
+	for _, row := range sourceRows {
+		line := buildTableRowLine(headers, row.Cells)
 		if line == "" {
 			continue
 		}
 		if sheetName != "" {
-			fmt.Fprintf(builder, "第%d行：工作表：%s；%s\n", index+2, sheetName, line)
+			fmt.Fprintf(builder, "第%d行：工作表：%s；%s\n", row.Number, sheetName, line)
 			continue
 		}
-		fmt.Fprintf(builder, "第%d行：%s\n", index+2, line)
+		fmt.Fprintf(builder, "第%d行：%s\n", row.Number, line)
 	}
 
 	return strings.TrimSpace(builder.String())

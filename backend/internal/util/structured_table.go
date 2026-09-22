@@ -22,6 +22,11 @@ type StructuredTableRow struct {
 	Values []string
 }
 
+type structuredSourceRow struct {
+	Number int
+	Cells  []string
+}
+
 func ExtractStructuredTables(path string) ([]StructuredTable, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
@@ -77,28 +82,21 @@ func extractStructuredXLSX(path string) ([]StructuredTable, error) {
 }
 
 func buildStructuredTable(fileName, sheet string, rows [][]string) StructuredTable {
-	nonEmptyRows := make([][]string, 0, len(rows))
-	for _, row := range rows {
-		if !rowHasContent(row) {
-			continue
-		}
-		nonEmptyRows = append(nonEmptyRows, trimTrailingEmptyCells(row))
-	}
-	if len(nonEmptyRows) == 0 {
+	headers, sourceRows := prepareStructuredRows(rows)
+	if len(headers) == 0 {
 		return StructuredTable{}
 	}
 
-	headers := normalizeTableHeaders(nonEmptyRows[0])
-	tableRows := make([]StructuredTableRow, 0, len(nonEmptyRows)-1)
-	for index, row := range nonEmptyRows[1:] {
+	tableRows := make([]StructuredTableRow, 0, len(sourceRows))
+	for _, sourceRow := range sourceRows {
 		values := make([]string, len(headers))
 		for cellIndex := range headers {
-			if cellIndex < len(row) {
-				values[cellIndex] = strings.TrimSpace(row[cellIndex])
+			if cellIndex < len(sourceRow.Cells) {
+				values[cellIndex] = strings.TrimSpace(sourceRow.Cells[cellIndex])
 			}
 		}
 		tableRows = append(tableRows, StructuredTableRow{
-			Number: index + 2,
+			Number: sourceRow.Number,
 			Values: values,
 		})
 	}
@@ -109,4 +107,38 @@ func buildStructuredTable(fileName, sheet string, rows [][]string) StructuredTab
 		Headers:  headers,
 		Rows:     tableRows,
 	}
+}
+
+func prepareStructuredRows(rows [][]string) ([]string, []structuredSourceRow) {
+	nonEmptyRows := make([]structuredSourceRow, 0, len(rows))
+	for index, row := range rows {
+		if !rowHasContent(row) {
+			continue
+		}
+		nonEmptyRows = append(nonEmptyRows, structuredSourceRow{
+			Number: index + 1,
+			Cells:  trimTrailingEmptyCells(row),
+		})
+	}
+	if len(nonEmptyRows) == 0 {
+		return nil, nil
+	}
+
+	headerIndex := 0
+	bestCellCount := 0
+	for index, row := range nonEmptyRows {
+		cellCount := 0
+		for _, cell := range row.Cells {
+			if strings.TrimSpace(cell) != "" {
+				cellCount++
+			}
+		}
+		if cellCount > bestCellCount {
+			bestCellCount = cellCount
+			headerIndex = index
+		}
+	}
+
+	headers := normalizeTableHeaders(nonEmptyRows[headerIndex].Cells)
+	return headers, nonEmptyRows[headerIndex+1:]
 }

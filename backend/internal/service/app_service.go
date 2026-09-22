@@ -25,11 +25,11 @@ import (
 )
 
 const (
-	ragSearchTopKDocument          = 6
-	ragSearchCandidateTopKDocument = 12
-	ragSearchTopKKnowledgeBase     = 10
-	ragSearchCandidateTopKAllDocs  = 32
-	ragMaxChunksPerDocument        = 2
+	ragSearchTopKDocument          = 8
+	ragSearchCandidateTopKDocument = 20
+	ragSearchTopKKnowledgeBase     = 12
+	ragSearchCandidateTopKAllDocs  = 48
+	ragMaxChunksPerDocument        = 5
 
 	rerankVectorWeight  = 0.72
 	rerankKeywordWeight = 0.28

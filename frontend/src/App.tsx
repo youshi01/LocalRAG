@@ -224,6 +224,7 @@ export interface AppConfig {
 }
 
 export type ChatMode = 'fast' | 'think'
+export type ChatContentMode = 'default' | 'full_table'
 export type WorkspaceView = 'chat' | 'knowledge' | 'settings'
 
 export interface ChatModeSettings {
@@ -421,6 +422,7 @@ function AppContent() {
   const activeChatRequestRef = useRef<{ requestId: string; conversationId: string } | null>(null)
 
   const [config, setConfig] = useState<AppConfig>(createDefaultAppConfig)
+  const [chatContentMode, setChatContentMode] = useState<ChatContentMode>('default')
 
   const {
     authCheckDone,
@@ -440,6 +442,18 @@ function AppContent() {
     setSelectedKnowledgeBaseId,
     setSelectedDocumentId,
   })
+
+  const supportsFullTableMode = Boolean(
+    selectedDocument
+      ? /\.(csv|xlsx|xls)$/i.test(selectedDocument.name)
+      : selectedKnowledgeBase?.documents.some((document) => /\.(csv|xlsx|xls)$/i.test(document.name)),
+  )
+
+  useEffect(() => {
+    if (!supportsFullTableMode) {
+      setChatContentMode('default')
+    }
+  }, [supportsFullTableMode])
 
   const {
     sidebarOpen,
@@ -1541,6 +1555,7 @@ function AppContent() {
       knowledgeBaseId: activeConversation.knowledgeBaseId,
       documentId: activeConversation.documentId,
       retrievalMode: config.retrieval.defaultSearchMode,
+      contentMode: chatContentMode,
       config: {
         ...config.chat,
         model: selectedChatModel,
@@ -1988,6 +2003,9 @@ function AppContent() {
             generatingConversationTitle={generatingConversationTitle}
             enforceSingleFlight={isOllamaSingleFlightMode}
             onChatModeChange={setChatMode}
+            contentMode={chatContentMode}
+            supportsFullTableMode={supportsFullTableMode}
+            onContentModeChange={setChatContentMode}
             onSendMessage={handleSendMessage}
             onClearConversation={handleClearConversation}
             onEditMessage={handleEditMessage}

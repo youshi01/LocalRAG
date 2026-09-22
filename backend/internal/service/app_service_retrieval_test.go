@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -950,6 +951,27 @@ func TestTrimRetrievedChunksDistributesContextAcrossEvidence(t *testing.T) {
 	}
 	if chunksTotalChars(trimmed) > 400 {
 		t.Fatalf("expected context within rune budget, got %d", chunksTotalChars(trimmed))
+	}
+}
+
+func TestFullTableContextKeepsRowsInOriginalOrder(t *testing.T) {
+	chunks := make([]RetrievedChunk, 0, 6)
+	for index := 1; index <= 6; index++ {
+		chunks = append(chunks, RetrievedChunk{DocumentChunk: DocumentChunk{
+			DocumentID: "doc-table",
+			Text:       fmt.Sprintf("第%d行：表格内容", index),
+		}})
+	}
+
+	kept := trimStructuredTableChunksToContextLimit(chunks, 1000)
+	if len(kept) != len(chunks) {
+		t.Fatalf("expected all table rows to remain under the context budget, got %d/%d", len(kept), len(chunks))
+	}
+	for index, chunk := range kept {
+		want := fmt.Sprintf("第%d行", index+1)
+		if !strings.Contains(chunk.Text, want) {
+			t.Fatalf("expected table row order to remain stable, row=%d text=%q", index+1, chunk.Text)
+		}
 	}
 }
 

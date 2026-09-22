@@ -7,6 +7,7 @@ export interface ChatRequestBody {
   knowledgeBaseId: string
   documentId: string
   retrievalMode: RetrievalConfig['defaultSearchMode']
+  contentMode: 'default' | 'full_table'
   config: ChatConfig
   embedding: EmbeddingConfig
   messages: Array<{
@@ -22,6 +23,7 @@ export const buildChatRequestBody = (input: {
   knowledgeBaseId: string
   documentId: string
   retrievalMode: RetrievalConfig['defaultSearchMode']
+  contentMode: 'default' | 'full_table'
   config: ChatConfig
   embedding: EmbeddingConfig
   messages: ChatMessage[]
@@ -32,6 +34,7 @@ export const buildChatRequestBody = (input: {
   knowledgeBaseId: input.knowledgeBaseId,
   documentId: input.documentId,
   retrievalMode: input.retrievalMode,
+  contentMode: input.contentMode,
   config: input.config,
   embedding: input.embedding,
   messages: input.messages.map((message) => ({

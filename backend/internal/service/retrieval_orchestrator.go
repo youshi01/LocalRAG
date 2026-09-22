@@ -61,8 +61,12 @@ func (s *AppService) buildRetrievedContext(ctx context.Context, req model.ChatCo
 	})
 
 	maxContextChars := s.retrievalMaxContextChars()
+	fullTableMode := strings.EqualFold(strings.TrimSpace(req.ContentMode), "full_table")
+	if fullTableMode {
+		maxContextChars = maxInt(maxContextChars, 20000)
+	}
 	compressedContext := ""
-	if s.contextCompressor != nil && maxContextChars > 0 && chunksTotalChars(chunks) > maxContextChars {
+	if !fullTableMode && s.contextCompressor != nil && maxContextChars > 0 && chunksTotalChars(chunks) > maxContextChars {
 		compressStartedAt := time.Now()
 		compressed, compressErr := s.contextCompressor.Compress(ctx, query, chunks)
 		if compressErr == nil && strings.TrimSpace(compressed) != "" {
@@ -81,7 +85,11 @@ func (s *AppService) buildRetrievedContext(ctx context.Context, req model.ChatCo
 
 	trimStartedAt := time.Now()
 	if compressedContext == "" && maxContextChars > 0 {
-		chunks = trimRetrievedChunksToContextLimit(chunks, maxContextChars, query)
+		if fullTableMode {
+			chunks = trimStructuredTableChunksToContextLimit(chunks, maxContextChars)
+		} else {
+			chunks = trimRetrievedChunksToContextLimit(chunks, maxContextChars, query)
+		}
 	}
 	logRetrievalStageMetrics(req, query, "context_trim", trimStartedAt, map[string]any{
 		"status":            ternaryString(compressedContext != "", "skipped_after_compression", "ok"),

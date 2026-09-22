@@ -131,6 +131,37 @@ func TestExtractDocumentTextFromXLSX(t *testing.T) {
 	}
 }
 
+func TestExtractDocumentTextFromXLSXSkipsTitleRowsAndKeepsAllColumns(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "titled.xlsx")
+	workbook := excelize.NewFile()
+	defer func() { _ = workbook.Close() }()
+	workbook.SetSheetName("Sheet1", "规则")
+	if err := workbook.SetSheetRow("规则", "A1", &[]string{"文件说明：蜜罐规则表"}); err != nil {
+		t.Fatalf("set title: %v", err)
+	}
+	if err := workbook.SetSheetRow("规则", "A4", &[]string{"类别", "动作", "优先级"}); err != nil {
+		t.Fatalf("set header: %v", err)
+	}
+	if err := workbook.SetSheetRow("规则", "A5", &[]string{"文件落地", "引流", "P1"}); err != nil {
+		t.Fatalf("set data: %v", err)
+	}
+	if err := workbook.SaveAs(path); err != nil {
+		t.Fatalf("save xlsx: %v", err)
+	}
+
+	text, err := ExtractDocumentText(path)
+	if err != nil {
+		t.Fatalf("extract xlsx: %v", err)
+	}
+	if !strings.Contains(text, "字段：类别、动作、优先级。数据行数：1") {
+		t.Fatalf("expected header row to be selected, got %q", text)
+	}
+	if !strings.Contains(text, "第5行：工作表：规则；类别：文件落地。动作：引流。优先级：P1。") {
+		t.Fatalf("expected all columns and original row number, got %q", text)
+	}
+}
+
 func TestExtractStructuredTableSummaryFromCSV(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sample-users.csv")

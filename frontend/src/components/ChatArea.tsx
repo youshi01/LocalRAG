@@ -3,6 +3,7 @@ import type {
   AppConfig,
   ChatMode,
   ChatModeSettings,
+  ChatContentMode,
   Conversation,
   DocumentItem,
   ChatSourceMetadata,
@@ -26,6 +27,9 @@ interface ChatAreaProps {
   generatingConversationTitle: string
   enforceSingleFlight: boolean
   onChatModeChange: (mode: ChatMode) => void
+  contentMode: ChatContentMode
+  supportsFullTableMode: boolean
+  onContentModeChange: (mode: ChatContentMode) => void
   onSendMessage: (content: string) => Promise<boolean>
   onClearConversation: () => void
   onEditMessage?: (messageId: string, newContent: string) => Promise<void>
@@ -70,6 +74,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   generatingConversationTitle,
   enforceSingleFlight,
   onChatModeChange,
+  contentMode,
+  supportsFullTableMode,
+  onContentModeChange,
   onSendMessage,
   onClearConversation,
   onEditMessage,
@@ -254,6 +261,18 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               <ChatIcon name={chatMode === 'think' ? 'brain' : 'bolt'} />
               <span>{activeModeModel}</span>
             </span>
+            {supportsFullTableMode && (
+              <select
+                aria-label="回答模式"
+                className="chat-content-mode"
+                value={contentMode}
+                onChange={(event) => onContentModeChange(event.target.value as ChatContentMode)}
+                title="完整表格模式会直接读取 CSV/XLSX 的表头和数据行"
+              >
+                <option value="default">普通问答</option>
+                <option value="full_table">完整表格查询</option>
+              </select>
+            )}
             <div className="chat-topbar-actions" aria-label="对话操作">
               <button
                 type="button"

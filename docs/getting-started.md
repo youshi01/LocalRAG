@@ -244,6 +244,10 @@ ENABLE_AUTH=true AUTH_PASSWORD=your-secure-password LOCALRAG_IMAGE_TAG=latest \
 7. 返回答案与命中文档来源。
 8. 持久化当前会话记录。
 
+默认检索参数已偏向完整召回：文档 TopK 8、文档候选 20、知识库 TopK 12、知识库候选 48、每文档片段 5、上下文上限 8000 字符。数值越大，证据覆盖越广，但响应延迟和模型上下文消耗也会增加。
+
+当当前知识范围包含 CSV/XLSX 文档时，聊天顶部会出现“完整表格查询”。该模式绕过普通摘要式向量召回，读取表头和数据行并直接生成 Markdown 表格；数据量超过安全上限时会明确提示展示范围。
+
 更完整的架构与组件说明见 [`docs/architecture.md`](./architecture.md)。
 
 ---

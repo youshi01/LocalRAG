@@ -13,7 +13,8 @@ import (
 )
 
 const (
-	structuredQueryRowLimit = 20
+	structuredQueryRowLimit     = 20
+	structuredFullTableRowLimit = 500
 )
 
 type structuredQueryIntent string
@@ -36,24 +37,26 @@ type structuredQueryPlan struct {
 }
 
 type StructuredDataQueryResult struct {
-	Query         string                    `json:"query"`
-	Intent        string                    `json:"intent"`
-	FilterField   string                    `json:"filterField,omitempty"`
-	FilterValue   string                    `json:"filterValue,omitempty"`
-	TargetField   string                    `json:"targetField,omitempty"`
-	TotalRows     int                       `json:"totalRows"`
-	MatchedRows   int                       `json:"matchedRows"`
-	Columns       []string                  `json:"columns,omitempty"`
-	Rows          []StructuredDataResultRow `json:"rows,omitempty"`
-	Aggregate     *StructuredDataAggregate  `json:"aggregate,omitempty"`
-	Groups        []StructuredDataGroup     `json:"groups,omitempty"`
-	RowsTruncated bool                      `json:"rowsTruncated,omitempty"`
+	Query          string                    `json:"query"`
+	Intent         string                    `json:"intent"`
+	FilterField    string                    `json:"filterField,omitempty"`
+	FilterValue    string                    `json:"filterValue,omitempty"`
+	TargetField    string                    `json:"targetField,omitempty"`
+	TotalRows      int                       `json:"totalRows"`
+	MatchedRows    int                       `json:"matchedRows"`
+	Columns        []string                  `json:"columns,omitempty"`
+	Rows           []StructuredDataResultRow `json:"rows,omitempty"`
+	Aggregate      *StructuredDataAggregate  `json:"aggregate,omitempty"`
+	Groups         []StructuredDataGroup     `json:"groups,omitempty"`
+	RowsTruncated  bool                      `json:"rowsTruncated,omitempty"`
+	DocumentFences map[string]string         `json:"-"`
 }
 
 type StructuredDataResultRow struct {
 	KnowledgeBaseID string            `json:"knowledgeBaseId"`
 	DocumentID      string            `json:"documentId"`
 	DocumentName    string            `json:"documentName"`
+	IndexFence      string            `json:"-"`
 	Sheet           string            `json:"sheet,omitempty"`
 	RowNumber       int               `json:"rowNumber"`
 	Values          map[string]string `json:"values"`
@@ -84,19 +87,76 @@ type structuredRowMatch struct {
 
 func (s *AppService) QueryStructuredData(req model.ChatCompletionRequest) (StructuredDataQueryResult, []map[string]string, bool, error) {
 	query := latestUserMessage(req.Messages)
-	if !looksLikeStructuredDataQuery(query) {
+	fullTableMode := strings.EqualFold(strings.TrimSpace(req.ContentMode), "full_table")
+	if !fullTableMode && !looksLikeStructuredDataQuery(query) {
 		return StructuredDataQueryResult{}, nil, false, nil
 	}
 
-	result, sources, ok, err := s.buildStructuredDataQueryResult(req, query)
+	result, sources, ok, err := s.buildStructuredDataQueryResult(req, query, fullTableMode)
 	if err != nil || !ok {
 		return StructuredDataQueryResult{}, nil, ok, err
 	}
 	return result, sources, true, nil
 }
 
-func (s *AppService) buildStructuredDataQueryResult(req model.ChatCompletionRequest, query string) (StructuredDataQueryResult, []map[string]string, bool, error) {
-	if !looksLikeStructuredDataQuery(query) {
+// BuildFullTableAnswer returns deterministic Markdown for the explicit full
+// table mode. It deliberately bypasses the chat model so a vague request such
+// as "看一下具体内容" cannot be reduced to a summary or an unsupported
+// "资料不足" answer.
+func (s *AppService) BuildFullTableAnswer(req model.ChatCompletionRequest) (StructuredDataQueryResult, []map[string]string, bool, error) {
+	result, sources, ok, err := s.QueryStructuredData(model.ChatCompletionRequest{
+		KnowledgeBaseID: req.KnowledgeBaseID,
+		DocumentID:      req.DocumentID,
+		ContentMode:     "full_table",
+		Messages:        req.Messages,
+	})
+	if err != nil || !ok {
+		return result, sources, ok, err
+	}
+	return result, sources, true, nil
+}
+
+func FormatStructuredDataMarkdown(result StructuredDataQueryResult) string {
+	if len(result.Rows) == 0 {
+		return structuredDataResultText(result, nil)
+	}
+
+	columns := append([]string{"工作表", "行号"}, result.Columns...)
+	var builder strings.Builder
+	builder.WriteString("## 完整表格内容\n\n")
+	builder.WriteString(fmt.Sprintf("总记录数：%d；匹配记录数：%d。\n\n", result.TotalRows, result.MatchedRows))
+	builder.WriteString("| ")
+	builder.WriteString(strings.Join(columns, " | "))
+	builder.WriteString(" |\n| ")
+	builder.WriteString(strings.TrimSuffix(strings.Repeat("--- | ", len(columns)), " "))
+	builder.WriteString("\n")
+
+	for _, row := range result.Rows {
+		builder.WriteString("| ")
+		builder.WriteString(escapeMarkdownTableCell(row.Sheet))
+		builder.WriteString(" | ")
+		builder.WriteString(strconv.Itoa(row.RowNumber))
+		for _, column := range result.Columns {
+			builder.WriteString(" | ")
+			builder.WriteString(escapeMarkdownTableCell(row.Values[column]))
+		}
+		builder.WriteString(" |\n")
+	}
+	if result.RowsTruncated {
+		builder.WriteString("\n> 表格行数超过当前安全上限，以上为前部分数据。\n")
+	}
+	return strings.TrimSpace(builder.String())
+}
+
+func escapeMarkdownTableCell(value string) string {
+	value = strings.ReplaceAll(strings.TrimSpace(value), "|", "\\|")
+	value = strings.ReplaceAll(value, "\r\n", "<br>")
+	value = strings.ReplaceAll(value, "\n", "<br>")
+	return value
+}
+
+func (s *AppService) buildStructuredDataQueryResult(req model.ChatCompletionRequest, query string, fullTableMode bool) (StructuredDataQueryResult, []map[string]string, bool, error) {
+	if !fullTableMode && !looksLikeStructuredDataQuery(query) {
 		return StructuredDataQueryResult{}, nil, false, nil
 	}
 
@@ -125,11 +185,14 @@ func (s *AppService) buildStructuredDataQueryResult(req model.ChatCompletionRequ
 	}
 
 	plan := buildStructuredQueryPlan(query, tables)
+	if fullTableMode && plan.Intent == "" {
+		plan.Intent = structuredIntentPreview
+	}
 	if plan.Intent == "" {
 		return StructuredDataQueryResult{}, nil, false, nil
 	}
 
-	result, ok := buildStructuredDataResult(query, plan, tables)
+	result, ok := buildStructuredDataResult(query, plan, tables, fullTableMode)
 	if !ok {
 		return StructuredDataQueryResult{}, nil, false, nil
 	}
@@ -704,20 +767,21 @@ func isStructuredCountQuestion(query string) bool {
 		containsAnyText(query, []string{"记录", "行", "条", "数据", "人员", "名单", "用户", "教师", "老师", "员工"})
 }
 
-func buildStructuredDataResult(query string, plan structuredQueryPlan, documents []structuredTableDocument) (StructuredDataQueryResult, bool) {
+func buildStructuredDataResult(query string, plan structuredQueryPlan, documents []structuredTableDocument, fullTableMode bool) (StructuredDataQueryResult, bool) {
 	allRows := collectStructuredRows(documents, "", "")
 	queryRows := allRows
 	if plan.FilterField != "" && plan.FilterValue != "" {
 		queryRows = collectStructuredRows(documents, plan.FilterField, plan.FilterValue)
 	}
 	result := StructuredDataQueryResult{
-		Query:       strings.TrimSpace(query),
-		Intent:      string(plan.Intent),
-		FilterField: plan.FilterField,
-		FilterValue: plan.FilterValue,
-		TargetField: plan.TargetField,
-		TotalRows:   len(allRows),
-		Columns:     allStructuredHeaders(documents),
+		Query:          strings.TrimSpace(query),
+		Intent:         string(plan.Intent),
+		FilterField:    plan.FilterField,
+		FilterValue:    plan.FilterValue,
+		TargetField:    plan.TargetField,
+		TotalRows:      len(allRows),
+		Columns:        allStructuredHeaders(documents),
+		DocumentFences: structuredDocumentFences(documents),
 	}
 
 	switch plan.Intent {
@@ -726,7 +790,9 @@ func buildStructuredDataResult(query string, plan structuredQueryPlan, documents
 		return result, true
 	case structuredIntentPreview:
 		limit := structuredQueryRowLimit
-		if containsAnyText(query, []string{"完整", "全部", "所有"}) {
+		if fullTableMode {
+			limit = structuredFullTableRowLimit
+		} else if containsAnyText(query, []string{"完整", "全部", "所有"}) {
 			limit *= 2
 		}
 		result.MatchedRows = len(allRows)
@@ -905,6 +971,7 @@ func structuredResultRows(matches []structuredRowMatch, limit int) ([]Structured
 			KnowledgeBaseID: match.Document.KnowledgeBaseID,
 			DocumentID:      match.Document.ID,
 			DocumentName:    match.Document.Name,
+			IndexFence:      match.Document.IndexFence,
 			Sheet:           match.Table.Sheet,
 			RowNumber:       match.Row.Number,
 			Values:          values,
@@ -953,6 +1020,17 @@ func structuredDataSources(documents []structuredTableDocument) []map[string]str
 	return sources
 }
 
+func structuredDocumentFences(documents []structuredTableDocument) map[string]string {
+	fences := make(map[string]string, len(documents))
+	for _, item := range documents {
+		if strings.TrimSpace(item.Document.ID) == "" {
+			continue
+		}
+		fences[item.Document.ID] = strings.TrimSpace(item.Document.IndexFence)
+	}
+	return fences
+}
+
 func (s *AppService) retrieveStructuredDataChunks(req model.ChatCompletionRequest) ([]RetrievedChunk, bool, error) {
 	result, sources, ok, err := s.QueryStructuredData(req)
 	if err != nil || !ok {
@@ -976,6 +1054,7 @@ func structuredDataResultChunks(result StructuredDataQueryResult, sources []map[
 					KnowledgeBaseID: row.KnowledgeBaseID,
 					DocumentID:      row.DocumentID,
 					DocumentName:    row.DocumentName,
+					IndexFence:      row.IndexFence,
 					Text:            text,
 					Index:           maxInt(row.RowNumber-1, index),
 					Kind:            "structured_query",
@@ -1021,6 +1100,7 @@ func structuredDataResultChunks(result StructuredDataQueryResult, sources []map[
 				KnowledgeBaseID: strings.TrimSpace(source["knowledgeBaseId"]),
 				DocumentID:      documentID,
 				DocumentName:    strings.TrimSpace(source["documentName"]),
+				IndexFence:      result.DocumentFences[documentID],
 				Text:            text,
 				Index:           index,
 				Kind:            "structured_query",

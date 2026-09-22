@@ -33,6 +33,27 @@ func TestQueryStructuredDataPreview(t *testing.T) {
 	}
 }
 
+func TestQueryStructuredDataFullTableModeAllowsVagueQuestion(t *testing.T) {
+	service := newStructuredQueryTestService(t)
+	result, sources, ok, err := service.QueryStructuredData(model.ChatCompletionRequest{
+		DocumentID:  "doc-users",
+		ContentMode: "full_table",
+		Messages:    []model.ChatMessage{{Role: "user", Content: "看一下具体内容"}},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !ok {
+		t.Fatal("expected full table mode to force structured data handling")
+	}
+	if result.Intent != "preview" || result.TotalRows != 3 || result.MatchedRows != 3 || len(result.Rows) != 3 {
+		t.Fatalf("unexpected full table result: %#v", result)
+	}
+	if len(sources) != 1 || sources[0]["sourceType"] != "structured-data" {
+		t.Fatalf("expected structured source metadata, got %#v", sources)
+	}
+}
+
 func TestLooksLikeStructuredDataQueryRequiresTableSignal(t *testing.T) {
 	if looksLikeStructuredDataQuery("列出主要角色") {
 		t.Fatal("expected ordinary document list question not to trigger structured data handling")
@@ -326,6 +347,49 @@ func TestBuildRetrievalContextUsesStructuredEvidence(t *testing.T) {
 	}
 	if len(sources) != 1 || sources[0]["chunkKind"] != "structured_query" {
 		t.Fatalf("expected structured query source, got %#v", sources)
+	}
+}
+
+func TestStructuredDataChunksPreserveIndexFenceForScopeFiltering(t *testing.T) {
+	result := StructuredDataQueryResult{
+		Query:       "看一下具体内容",
+		Intent:      "preview",
+		TotalRows:   1,
+		MatchedRows: 1,
+		Columns:     []string{"名称"},
+		Rows: []StructuredDataResultRow{{
+			KnowledgeBaseID: "kb-1",
+			DocumentID:      "doc-1",
+			DocumentName:    "records.xlsx",
+			IndexFence:      "fence-1",
+			Sheet:           "Sheet1",
+			RowNumber:       2,
+			Values:          map[string]string{"名称": "成员甲"},
+		}},
+	}
+
+	chunks := structuredDataResultChunks(result, nil)
+	if len(chunks) != 1 || chunks[0].IndexFence != "fence-1" {
+		t.Fatalf("expected structured chunk to preserve index fence, got %#v", chunks)
+	}
+}
+
+func TestFormatStructuredDataMarkdownIncludesAllRowsAndColumns(t *testing.T) {
+	result := StructuredDataQueryResult{
+		TotalRows:   2,
+		MatchedRows: 2,
+		Columns:     []string{"类别", "动作"},
+		Rows: []StructuredDataResultRow{
+			{DocumentName: "rules.xlsx", Sheet: "规则", RowNumber: 2, Values: map[string]string{"类别": "文件落地", "动作": "引流"}},
+			{DocumentName: "rules.xlsx", Sheet: "规则", RowNumber: 3, Values: map[string]string{"类别": "命令执行", "动作": "观察"}},
+		},
+	}
+
+	markdown := FormatStructuredDataMarkdown(result)
+	for _, expected := range []string{"完整表格内容", "类别", "动作", "文件落地", "引流", "命令执行", "观察", "规则", "| 3 |"} {
+		if !strings.Contains(markdown, expected) {
+			t.Fatalf("expected full table markdown to contain %q, got %s", expected, markdown)
+		}
 	}
 }
 

@@ -190,6 +190,31 @@ func trimRetrievedChunksToContextLimit(chunks []RetrievedChunk, maxChars int, qu
 	return trimmed
 }
 
+// trimStructuredTableChunksToContextLimit preserves table row order and whole
+// row evidence. Generic retrieval trimming deliberately keeps only the most
+// query-relevant three or four chunks, which is useful for prose but silently
+// drops rows in an explicit full-table query.
+func trimStructuredTableChunksToContextLimit(chunks []RetrievedChunk, maxChars int) []RetrievedChunk {
+	if len(chunks) == 0 || maxChars <= 0 {
+		return chunks
+	}
+
+	kept := make([]RetrievedChunk, 0, len(chunks))
+	total := 0
+	for _, chunk := range chunks {
+		textChars := len([]rune(strings.TrimSpace(chunk.Text)))
+		if textChars == 0 {
+			continue
+		}
+		if len(kept) > 0 && total+textChars > maxChars {
+			break
+		}
+		kept = append(kept, chunk)
+		total += textChars
+	}
+	return kept
+}
+
 func relevantChunkExcerpt(query, text string, limit int) string {
 	runes := []rune(strings.TrimSpace(text))
 	if limit <= 0 || len(runes) <= limit {

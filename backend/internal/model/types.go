@@ -518,6 +518,7 @@ type ChatCompletionRequest struct {
 	KnowledgeBaseID         string               `json:"knowledgeBaseId"`
 	DocumentID              string               `json:"documentId"`
 	RetrievalMode           string               `json:"retrievalMode,omitempty"`
+	ContentMode             string               `json:"contentMode,omitempty"`
 	RerankStrategy          string               `json:"rerankStrategy,omitempty"`
 	EnableQueryRewrite      *bool                `json:"enableQueryRewrite,omitempty"`
 	QueryRewriteMaxVariants int                  `json:"queryRewriteMaxVariants,omitempty"`

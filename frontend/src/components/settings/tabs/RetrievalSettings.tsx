@@ -53,12 +53,12 @@ const retrievalPresets: RetrievalPreset[] = [
       rerankStrategy: 'keyword',
       enableQueryRewrite: true,
       queryRewriteMaxVariants: 3,
-      topKDocument: 6,
-      candidateTopKDocument: 12,
-      topKKnowledgeBase: 10,
-      candidateTopKAllDocs: 32,
-      maxChunksPerDocument: 2,
-      maxContextChars: 2400,
+      topKDocument: 8,
+      candidateTopKDocument: 20,
+      topKKnowledgeBase: 12,
+      candidateTopKAllDocs: 48,
+      maxChunksPerDocument: 5,
+      maxContextChars: 8000,
       enableLowConfidenceBoost: false,
     },
   },
@@ -73,12 +73,12 @@ const retrievalPresets: RetrievalPreset[] = [
       rerankStrategy: 'semantic',
       enableQueryRewrite: true,
       queryRewriteMaxVariants: 4,
-      topKDocument: 8,
-      candidateTopKDocument: 20,
-      topKKnowledgeBase: 14,
-      candidateTopKAllDocs: 48,
-      maxChunksPerDocument: 3,
-      maxContextChars: 4200,
+      topKDocument: 10,
+      candidateTopKDocument: 30,
+      topKKnowledgeBase: 16,
+      candidateTopKAllDocs: 64,
+      maxChunksPerDocument: 6,
+      maxContextChars: 12000,
       enableLowConfidenceBoost: true,
     },
   },
@@ -144,7 +144,7 @@ const RetrievalSettings: React.FC<RetrievalSettingsProps> = ({
       <section className="settings-form-section settings-retrieval-core">
         <header>
           <h4>核心策略</h4>
-          <p>决定召回方式、排序方法和回答证据长度。</p>
+          <p>决定召回方式、排序方法和回答证据长度。默认已适当放宽，适合知识库和表格问答。</p>
         </header>
         <div className="settings-form-grid settings-form-grid-dense">
           <div className="settings-form-group">
@@ -236,11 +236,11 @@ const RetrievalSettings: React.FC<RetrievalSettingsProps> = ({
       <section className="settings-form-section settings-retrieval-detail">
         <header>
           <h4>召回规模</h4>
-          <p>控制初始候选和最终进入上下文的片段数量。</p>
+          <p>控制初始候选和最终进入上下文的片段数量。数值越大，证据更完整，但耗时和模型上下文消耗也会增加。</p>
         </header>
         <div className="settings-form-grid settings-form-grid-dense">
           <div className="settings-form-group">
-            <label className="settings-form-label" htmlFor="retrieval-document-top-k">文档 TopK</label>
+            <label className="settings-form-label" htmlFor="retrieval-document-top-k">文档 TopK（默认 8）</label>
             <input
               id="retrieval-document-top-k"
               type="number"
@@ -251,7 +251,7 @@ const RetrievalSettings: React.FC<RetrievalSettingsProps> = ({
             />
           </div>
           <div className="settings-form-group">
-            <label className="settings-form-label" htmlFor="retrieval-document-candidates">文档候选</label>
+            <label className="settings-form-label" htmlFor="retrieval-document-candidates">文档候选（默认 20）</label>
             <input
               id="retrieval-document-candidates"
               type="number"
@@ -262,7 +262,7 @@ const RetrievalSettings: React.FC<RetrievalSettingsProps> = ({
             />
           </div>
           <div className="settings-form-group">
-            <label className="settings-form-label" htmlFor="retrieval-kb-top-k">知识库 TopK</label>
+            <label className="settings-form-label" htmlFor="retrieval-kb-top-k">知识库 TopK（默认 12）</label>
             <input
               id="retrieval-kb-top-k"
               type="number"
@@ -273,7 +273,7 @@ const RetrievalSettings: React.FC<RetrievalSettingsProps> = ({
             />
           </div>
           <div className="settings-form-group">
-            <label className="settings-form-label" htmlFor="retrieval-kb-candidates">知识库候选</label>
+            <label className="settings-form-label" htmlFor="retrieval-kb-candidates">知识库候选（默认 48）</label>
             <input
               id="retrieval-kb-candidates"
               type="number"
@@ -284,7 +284,7 @@ const RetrievalSettings: React.FC<RetrievalSettingsProps> = ({
             />
           </div>
           <div className="settings-form-group">
-            <label className="settings-form-label" htmlFor="retrieval-chunks-per-document">每文档片段数</label>
+            <label className="settings-form-label" htmlFor="retrieval-chunks-per-document">每文档片段数（默认 5）</label>
             <input
               id="retrieval-chunks-per-document"
               type="number"

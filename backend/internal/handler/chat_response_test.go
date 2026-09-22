@@ -44,7 +44,7 @@ func TestFilterOperationalChatMessages(t *testing.T) {
 func TestBuildChatSystemPromptDoesNotInjectQuestionSpecificAnswers(t *testing.T) {
 	prompt := buildChatSystemPrompt([]string{
 		"检索命中的文档片段：\n字段：姓名、职称\n数据行数：4",
-	}, false)
+	}, false, false)
 
 	for _, forbidden := range []string{
 		"表格计数回答要求",

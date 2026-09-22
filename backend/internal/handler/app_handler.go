@@ -644,6 +644,36 @@ func (h *AppHandler) ChatCompletions(c *gin.Context) {
 		return
 	}
 
+	if content, sources, structuredData, ok, err := h.fullTableAnswer(req); err != nil {
+		writeChatPreparationError(c, err)
+		return
+	} else if ok {
+		metadata := fullTableMetadata(req, sources, structuredData)
+		response := model.ChatCompletionResponse{
+			ID:      fmt.Sprintf("structured-%d", time.Now().UnixNano()),
+			Object:  "chat.completion",
+			Created: time.Now().Unix(),
+			Model:   req.Model,
+			Choices: []model.ChatCompletionChoice{{
+				Index:   0,
+				Message: model.ChatMessage{Role: "assistant", Content: content},
+			}},
+			Metadata: metadata,
+		}
+		if _, saveErr := h.appService.SaveConversation(model.SaveConversationRequest{
+			ID:              req.ConversationID,
+			Title:           "",
+			KnowledgeBaseID: req.KnowledgeBaseID,
+			DocumentID:      req.DocumentID,
+			Messages:        buildStoredConversationMessages(req.Messages, content, metadata),
+		}); saveErr != nil {
+			writeError(c, http.StatusInternalServerError, saveErr.Error())
+			return
+		}
+		c.JSON(http.StatusOK, response)
+		return
+	}
+
 	preparedReq, sources, err := h.prepareChatRequest(req)
 	if err != nil {
 		writeChatPreparationError(c, err)
@@ -697,6 +727,37 @@ func (h *AppHandler) ChatCompletionsStream(c *gin.Context) {
 	var req model.ChatCompletionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeError(c, http.StatusBadRequest, "invalid chat request body")
+		return
+	}
+
+	if content, sources, structuredData, ok, err := h.fullTableAnswer(req); err != nil {
+		writeChatPreparationError(c, err)
+		return
+	} else if ok {
+		c.Writer.Header().Set("Content-Type", "text/event-stream")
+		c.Writer.Header().Set("Cache-Control", "no-cache")
+		c.Writer.Header().Set("Connection", "keep-alive")
+		c.Writer.Header().Set("X-Accel-Buffering", "no")
+		c.Status(http.StatusOK)
+		flusher, flushOK := c.Writer.(http.Flusher)
+		if !flushOK {
+			writeError(c, http.StatusInternalServerError, "streaming is not supported")
+			return
+		}
+		metadata := fullTableMetadata(req, sources, structuredData)
+		c.SSEvent("meta", metadata)
+		c.SSEvent("chunk", gin.H{"content": content})
+		c.SSEvent("done", gin.H{"content": content, "metadata": metadata})
+		flusher.Flush()
+		if _, saveErr := h.appService.SaveConversation(model.SaveConversationRequest{
+			ID:              req.ConversationID,
+			Title:           "",
+			KnowledgeBaseID: req.KnowledgeBaseID,
+			DocumentID:      req.DocumentID,
+			Messages:        buildStoredConversationMessages(req.Messages, content, metadata),
+		}); saveErr != nil {
+			return
+		}
 		return
 	}
 
@@ -773,6 +834,38 @@ func (h *AppHandler) ChatCompletionsStream(c *gin.Context) {
 	flusher.Flush()
 }
 
+func (h *AppHandler) fullTableAnswer(req model.ChatCompletionRequest) (string, []map[string]string, service.StructuredDataQueryResult, bool, error) {
+	if !strings.EqualFold(strings.TrimSpace(req.ContentMode), "full_table") {
+		return "", nil, service.StructuredDataQueryResult{}, false, nil
+	}
+	if len(req.Messages) == 0 {
+		return "", nil, service.StructuredDataQueryResult{}, false, fmt.Errorf("messages cannot be empty")
+	}
+	if err := h.appService.ValidateChatRequestScope(req); err != nil {
+		return "", nil, service.StructuredDataQueryResult{}, false, err
+	}
+	result, sources, ok, err := h.appService.BuildFullTableAnswer(req)
+	if err != nil || !ok {
+		return "", sources, result, ok, err
+	}
+	return service.FormatStructuredDataMarkdown(result), sources, result, true, nil
+}
+
+func fullTableMetadata(req model.ChatCompletionRequest, sources []map[string]string, result service.StructuredDataQueryResult) map[string]any {
+	return map[string]any{
+		"sources":         sources,
+		"knowledgeBaseId": req.KnowledgeBaseID,
+		"documentId":      req.DocumentID,
+		"contentMode":     "full_table",
+		"structuredData":  result,
+		"toolUse":         buildToolUseMetadata(sources),
+		"citationSupport": map[string]any{
+			"status":  "structured",
+			"summary": "回答由结构化表格原文直接生成。",
+		},
+	}
+}
+
 func (h *AppHandler) prepareChatRequest(req model.ChatCompletionRequest) (model.ChatCompletionRequest, []map[string]string, error) {
 	if len(req.Messages) == 0 {
 		return model.ChatCompletionRequest{}, nil, fmt.Errorf("messages cannot be empty")
@@ -820,13 +913,13 @@ func (h *AppHandler) prepareChatRequest(req model.ChatCompletionRequest) (model.
 
 	preparedReq.Messages = append([]model.ChatMessage{{
 		Role:    "system",
-		Content: buildChatSystemPrompt(contextParts, isDiagramRequest),
+		Content: buildChatSystemPrompt(contextParts, isDiagramRequest, strings.EqualFold(strings.TrimSpace(req.ContentMode), "full_table")),
 	}}, preparedReq.Messages...)
 
 	return preparedReq, allSources, nil
 }
 
-func buildChatSystemPrompt(contextParts []string, isDiagramRequest bool) string {
+func buildChatSystemPrompt(contextParts []string, isDiagramRequest bool, fullTableMode bool) string {
 	promptSections := []string{
 		"你是 LocalRAG 的聊天与知识库助手。",
 		"直接回答用户的问题，保持准确、自然、简洁，不要虚构事实或来源。",
@@ -842,6 +935,13 @@ func buildChatSystemPrompt(contextParts []string, isDiagramRequest bool) string 
 			"",
 			"KNOWLEDGE_CONTEXT：",
 			strings.Join(contextParts, "\n\n"),
+		)
+	}
+	if fullTableMode {
+		promptSections = append(promptSections,
+			"",
+			"当前为完整表格查询模式：优先使用表头、工作表和全部数据行回答；不要把表格摘要误当作完整内容。",
+			"如果数据行很多，明确说明实际展示范围和总行数，不要编造缺失行。",
 		)
 	}
 	if isDiagramRequest {

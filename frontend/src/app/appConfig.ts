@@ -12,12 +12,12 @@ export const defaultRetrievalConfig: RetrievalConfig = {
   rerankStrategy: 'keyword',
   enableQueryRewrite: false,
   queryRewriteMaxVariants: 3,
-  topKDocument: 6,
-  candidateTopKDocument: 12,
-  topKKnowledgeBase: 10,
-  candidateTopKAllDocs: 32,
-  maxChunksPerDocument: 2,
-  maxContextChars: 2400,
+  topKDocument: 8,
+  candidateTopKDocument: 20,
+  topKKnowledgeBase: 12,
+  candidateTopKAllDocs: 48,
+  maxChunksPerDocument: 5,
+  maxContextChars: 8000,
   enableLowConfidenceBoost: false,
 }
 

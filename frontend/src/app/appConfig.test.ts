@@ -17,6 +17,15 @@ describe('app config', () => {
     expect(first.embedding.model).toBe('nomic-embed-text')
   })
 
+  it('uses a wider default retrieval budget for knowledge-base answers', () => {
+    expect(defaultRetrievalConfig.topKDocument).toBe(8)
+    expect(defaultRetrievalConfig.candidateTopKDocument).toBe(20)
+    expect(defaultRetrievalConfig.topKKnowledgeBase).toBe(12)
+    expect(defaultRetrievalConfig.candidateTopKAllDocs).toBe(48)
+    expect(defaultRetrievalConfig.maxChunksPerDocument).toBe(5)
+    expect(defaultRetrievalConfig.maxContextChars).toBe(8000)
+  })
+
   it('normalizes retrieval bounds and unsupported enum values', () => {
     const fallback = createDefaultAppConfig()
     const normalized = normalizeAppConfig({

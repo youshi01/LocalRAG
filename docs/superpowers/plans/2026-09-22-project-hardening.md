@@ -49,7 +49,6 @@ Run from the repository root:
 ```powershell
 rg -n "GITHUB_OWNER:|ghcr.io/|v1\.4\.6" .github docker-compose*.yml DOCKER_DEPLOY.md README.md docs/getting-started.md
 ```
-
 Expected: the command shows `GITHUB_OWNER: veyliss` and the stale `v1.4.6` fallback.
 
 - [ ] **Step 3: Update owner and tag references**
@@ -283,4 +282,3 @@ git add README.md TROUBLESHOOTING.md docs DOCKER_DEPLOY.md .github docker-compos
 git commit -m "docs: align deployment and model capability guidance"
 git status --short --branch
 ```
-

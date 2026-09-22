@@ -1,7 +1,9 @@
 package service
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"localrag/internal/model"
 )
@@ -44,5 +46,59 @@ func TestDocumentEmbeddingFingerprintMismatchRequiresReindex(t *testing.T) {
 	}
 	if documentEmbeddingFingerprintNeedsReindex(model.Document{Status: "indexed", EmbeddingFingerprint: current}, current) {
 		t.Fatal("matching embedding fingerprint should not require reindex")
+	}
+}
+
+func TestCommitIndexOperationPersistsEmbeddingFingerprintWithoutLockingState(t *testing.T) {
+	service := &AppService{state: &model.AppState{
+		Config: model.AppConfig{Embedding: model.EmbeddingConfig{
+			Provider: "ollama",
+			BaseURL:  "http://127.0.0.1:11434",
+			Model:    "embed-test",
+		}},
+		KnowledgeBases: map[string]model.KnowledgeBase{
+			"kb-1": {ID: "kb-1"},
+		},
+	}}
+
+	op, err := service.beginIndexOperation(context.Background(), model.Document{
+		ID:              "doc-1",
+		KnowledgeBaseID: "kb-1",
+		Name:            "notes.md",
+		Status:          "processing",
+		Version:         1,
+	})
+	if err != nil {
+		t.Fatalf("begin index operation: %v", err)
+	}
+
+	type commitResult struct {
+		document model.Document
+		err      error
+	}
+	result := make(chan commitResult, 1)
+	go func() {
+		document, err := service.commitIndexOperation(context.Background(), op, model.Document{
+			ID:              op.DocumentID,
+			KnowledgeBaseID: op.KnowledgeBaseID,
+			Name:            "notes.md",
+			Status:          "indexed",
+			Version:         1,
+			IndexFence:      op.Fence,
+		}, "upload", time.Now().UTC())
+		result <- commitResult{document: document, err: err}
+	}()
+
+	select {
+	case got := <-result:
+		if got.err != nil {
+			t.Fatalf("commit index operation: %v", got.err)
+		}
+		expected := embeddingFingerprintForConfig(service.state.Config.Embedding, service.qdrantVectorSize())
+		if got.document.EmbeddingFingerprint != expected {
+			t.Fatalf("expected committed document fingerprint %q, got %q", expected, got.document.EmbeddingFingerprint)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("commit index operation timed out while reading embedding configuration")
 	}
 }

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   isCurrentModelDiscoveryRequest,
   modelOptionLabel,
-  modelProbeKey,
   resetModelOptionsKey,
 } from './modelOptions'
 
@@ -55,10 +54,4 @@ describe('model option UI helpers', () => {
     expect(isCurrentModelDiscoveryRequest(nextKey, 5, nextKey, 5)).toBe(true)
   })
 
-  it('changes the probe key when the selected model or temperature changes', () => {
-    const original = modelProbeKey('chat', 'ollama', 'http://localhost:11434', 'model-a', 'secret', 0.2)
-
-    expect(modelProbeKey('chat', 'ollama', 'http://localhost:11434', 'model-b', 'secret', 0.2)).not.toBe(original)
-    expect(modelProbeKey('chat', 'ollama', 'http://localhost:11434', 'model-a', 'secret', 0.5)).not.toBe(original)
-  })
 })

@@ -16,16 +16,6 @@ export const resetModelOptionsKey = (
   credentialState = '',
 ) => type + ':' + provider.trim().toLowerCase() + ':' + baseUrl.trim().replace(/\/+$/, '') + ':' + secretFingerprint(`${apiKey}\u0000${credentialState}`)
 
-export const modelProbeKey = (
-  type: string,
-  provider: string,
-  baseUrl: string,
-  modelName: string,
-  apiKey: string,
-  temperature?: number,
-  credentialState = '',
-) => resetModelOptionsKey(type, provider, baseUrl, apiKey, credentialState) + ':' + modelName.trim() + ':' + (temperature ?? '')
-
 export const modelOptionLabel = (option: ModelOption) => {
   const ownerLabel = option.owned_by ? ' · ' + option.owned_by : ''
   const capabilityLabel = option.capability_status === 'supported'

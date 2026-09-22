@@ -36,8 +36,18 @@ func (s *AppService) currentEmbeddingFingerprint() string {
 		return ""
 	}
 	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
+	return s.currentEmbeddingFingerprintLocked()
+}
+
+// currentEmbeddingFingerprintLocked reads the embedding configuration while the
+// caller already holds state.Mu. Keeping the lock ownership explicit avoids
+// attempting to acquire a read lock from a state write-lock critical section.
+func (s *AppService) currentEmbeddingFingerprintLocked() string {
+	if s == nil || s.state == nil {
+		return ""
+	}
 	config := s.state.Config.Embedding
-	s.state.Mu.RUnlock()
 	if strings.TrimSpace(config.Provider) == "" || strings.TrimSpace(config.BaseURL) == "" || strings.TrimSpace(config.Model) == "" {
 		return ""
 	}

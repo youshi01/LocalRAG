@@ -190,9 +190,10 @@ Docker Desktop（Windows）中的后端访问宿主机 Ollama 时，Base URL 使
 也可以填写以 `/v1` 结尾的地址；后端会统一规范化为所需的 `/v1` 基址。
 
 - **获取模型**：向当前 Provider 读取可用模型候选列表，不会下载模型；请先在 Ollama 或对应 Provider 中安装/提供模型。
-- **探测模型**：向所选 Chat 或 Embedding 模型发送一次真实请求，并在设置页显示本次请求的 latency（毫秒）。
-- **Embedding 维度**：Embedding 探测会返回实际向量维度；要成功用于索引，该维度必须与 `QDRANT_VECTOR_SIZE` 匹配。不匹配时应调整模型或 Qdrant 配置，并使用新的 `QDRANT_COLLECTION_PREFIX` 后重新索引。
-- **保存行为**：探测仅检查当前表单值，不会自动保存配置；探测失败也不会自动覆盖或写入当前已保存的模型配置。确认配置后，请使用设置页的“保存”按钮。
+- **能力标签**：Provider 返回能力元数据时，候选会标记为“能力匹配”或“不支持当前类型”；未提供元数据的 OpenAI Compatible 服务会标记为“能力待确认”，不会被错误过滤。
+- **保存后健康检查**：保存配置后，后台会对 Chat、Embedding、Qdrant 和存储执行健康检查，并在设置底部反馈异常；模型能力最终以真实接口响应为准。
+- **Embedding 维度**：健康检查会验证实际向量维度；要成功用于索引，该维度必须与 `QDRANT_VECTOR_SIZE` 匹配。不匹配时应调整模型或 Qdrant 配置，并使用新的 `QDRANT_COLLECTION_PREFIX` 后重新索引。
+- **Embedding 模型指纹**：更换 Embedding 模型、服务地址或向量维度后，即使维度相同也会标记已有文档需要重新索引，避免新旧向量混用。
 - **Chat 与 Embedding 独立**：Embedding 不要求使用本机 Ollama，可以配置公网、公司内网或其他 OpenAI Compatible 服务。能调用 Chat 接口不代表同一服务也提供 Embedding 接口，必要时请为 Chat 和 Embedding 分别配置地址与模型。
 - **Embedding 接口要求**：如果服务返回 `This server does not support embeddings. Start it with --embeddings`，请在该服务启动时启用 embeddings，或把 Embedding 配置改为支持 `/v1/embeddings`（Ollama 使用 `/api/embed`）的服务。
 

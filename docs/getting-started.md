@@ -33,17 +33,6 @@ docker compose -f docker-compose.dev.yml up --build
 
 `docker-compose.dev.yml` 会同时启动 Qdrant、后端和前端开发服务器，并挂载本地代码，适合日常开发和 UI 调试。
 
-Windows Docker Desktop 如果出现 `dockerDesktopLinuxEngine`、`dockerInference` 或
-`docker-secrets-engine` 运行时 socket 错误，可使用仓库脚本启动开发编排：
-
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-docker-localrag.ps1 -Up
-```
-
-该脚本只隔离 Docker 临时运行目录，不删除镜像、volume、WSL 磁盘或项目数据；默认使用
-`--no-build --pull never`，避免每次启动重复下载镜像。前端依赖仅在缓存的
-`node_modules` 不存在时执行一次 `npm ci`。
-
 ### Chat 与 Embedding 模型配置
 
 首次进入设置页后，需要分别确认 Chat 与 Embedding 模型在对应服务中可用。Embedding

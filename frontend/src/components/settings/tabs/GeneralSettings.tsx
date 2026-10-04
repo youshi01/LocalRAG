@@ -5,7 +5,6 @@ import AboutSettings from './AboutSettings'
 
 interface GeneralSettingsProps {
   config: AppConfig
-  thinkModel: string
 }
 
 interface PreferenceRow {
@@ -25,7 +24,7 @@ interface OverviewMetric {
   status?: 'enabled' | 'disabled'
 }
 
-const GeneralSettings: React.FC<GeneralSettingsProps> = ({ config, thinkModel }) => {
+const GeneralSettings: React.FC<GeneralSettingsProps> = ({ config }) => {
   const chatProviderLabel = config.chat.provider === 'ollama' ? 'Ollama' : 'OpenAI Compatible'
   const embeddingProviderLabel = config.embedding.provider === 'ollama' ? 'Ollama' : 'OpenAI Compatible'
   const searchModeLabel = config.retrieval.defaultSearchMode === 'hybrid' ? '混合检索' : '向量检索'
@@ -65,11 +64,11 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ config, thinkModel })
       status: config.chat.model ? 'neutral' : 'disabled',
     },
     {
-      title: '生成与推理',
+      title: '回答参数',
       description: `普通聊天温度 ${config.chat.temperature.toFixed(1)} · 知识库温度 ${config.chat.knowledgeTemperature.toFixed(1)}`,
-      value: thinkModel || config.chat.model || '跟随聊天模型',
+      value: '思考模式跟随聊天模型',
       icon: 'brain',
-      meta: `思考模型 · 上下文 ${config.chat.contextMessageLimit} 条`,
+      meta: `上下文 ${config.chat.contextMessageLimit} 条 · 开关位于聊天界面`,
     },
     {
       title: 'Embedding 模型',
@@ -83,7 +82,7 @@ const GeneralSettings: React.FC<GeneralSettingsProps> = ({ config, thinkModel })
       description: `${rerankLabel} · ${config.retrieval.enableQueryRewrite ? `${config.retrieval.queryRewriteMaxVariants} 路问题改写` : '不改写问题'}`,
       value: searchModeLabel,
       icon: 'sliders',
-      meta: config.retrieval.enableLowConfidenceBoost ? '低置信补强已启用' : '低置信补强未启用',
+      meta: `${config.retrieval.enableModelRetrievalPlanner ? `模型辅助检索 ${config.retrieval.modelRetrievalMaxRounds} 轮` : '模型辅助检索未启用'} · ${config.retrieval.enableLowConfidenceBoost ? '低置信补强已启用' : '低置信补强未启用'}`,
       status: config.retrieval.hybridSearchEnabled ? 'enabled' : 'neutral',
     },
     {

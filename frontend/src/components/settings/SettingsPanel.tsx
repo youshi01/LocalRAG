@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import type { AppConfig, ChatConfig, ChatModeSettings, EmbeddingConfig, RetrievalConfig } from '../../App'
+import type { AppConfig, ChatConfig, EmbeddingConfig, RetrievalConfig } from '../../App'
 import AppIcon, { type AppIconName } from '../common/AppIcon'
 import ConfirmDialog from '../common/ConfirmDialog'
 import GeneralSettings from './tabs/GeneralSettings'
@@ -15,8 +15,7 @@ type SettingsTab = 'overview' | 'models' | 'retrieval' | 'access' | 'account'
 interface SettingsPanelProps {
   config: AppConfig
   onClose: () => void
-  chatModeSettings: ChatModeSettings
-  onSave: (config: AppConfig, thinkModel: string) => Promise<AppConfig>
+  onSave: (config: AppConfig) => Promise<AppConfig>
   onCopyMcpToken: () => Promise<void>
   onResetMcpToken: () => Promise<void>
   onLogout: () => void | Promise<void>
@@ -40,8 +39,7 @@ const navItems: SettingsNavItem[] = [
 const getTabButtonId = (tabId: SettingsTab) => `settings-tab-${tabId}`
 const getTabPanelId = (tabId: SettingsTab) => `settings-panel-${tabId}`
 
-const getConfigFingerprint = (config: AppConfig, thinkModel: string) =>
-  JSON.stringify([config, thinkModel])
+const getConfigFingerprint = (config: AppConfig) => JSON.stringify(config)
 
 const validateConfig = (config: AppConfig) => {
   const requiredFields = [
@@ -86,6 +84,9 @@ const validateConfig = (config: AppConfig) => {
   if (config.retrieval.queryRewriteMaxVariants < 1 || config.retrieval.queryRewriteMaxVariants > 5) {
     return '问题改写数量需要在 1 到 5 之间'
   }
+  if (config.retrieval.modelRetrievalMaxRounds < 1 || config.retrieval.modelRetrievalMaxRounds > 2) {
+    return '模型辅助检索轮数需要在 1 到 2 之间'
+  }
   if (config.retrieval.candidateTopKDocument < config.retrieval.topKDocument) {
     return '文档候选 TopK 不能小于文档 TopK'
   }
@@ -99,7 +100,6 @@ const validateConfig = (config: AppConfig) => {
 const SettingsPanel: React.FC<SettingsPanelProps> = ({
   config,
   onClose,
-  chatModeSettings,
   onSave,
   onCopyMcpToken,
   onResetMcpToken,
@@ -109,8 +109,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
   const [baselineConfig, setBaselineConfig] = useState(config)
   const [draftConfig, setDraftConfig] = useState(config)
-  const [baselineThinkModel, setBaselineThinkModel] = useState(chatModeSettings.thinkModel)
-  const [draftThinkModel, setDraftThinkModel] = useState(chatModeSettings.thinkModel)
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveHealthWarning, setSaveHealthWarning] = useState('')
@@ -119,9 +117,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [pendingCredentialDestination, setPendingCredentialDestination] = useState<SettingsTab | 'close' | null>(null)
 
   const isDirty = useMemo(
-    () => getConfigFingerprint(draftConfig, draftThinkModel) !==
-      getConfigFingerprint(baselineConfig, baselineThinkModel),
-    [baselineConfig, baselineThinkModel, draftConfig, draftThinkModel],
+    () => getConfigFingerprint(draftConfig) !==
+      getConfigFingerprint(baselineConfig),
+    [baselineConfig, draftConfig],
   )
 
   useEffect(() => {
@@ -130,9 +128,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
     setBaselineConfig(config)
     setDraftConfig(config)
-    setBaselineThinkModel(chatModeSettings.thinkModel)
-    setDraftThinkModel(chatModeSettings.thinkModel)
-  }, [chatModeSettings.thinkModel, config, isDirty, isSaving])
+  }, [config, isDirty, isSaving])
 
   const markDraftChanged = useCallback(() => {
     setSaveError(null)
@@ -190,17 +186,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }))
   }, [markDraftChanged])
 
-  const handleThinkModelChange = useCallback((value: string) => {
-    markDraftChanged()
-    setDraftThinkModel(value)
-  }, [markDraftChanged])
-
   const handleDiscard = useCallback(() => {
     setDraftConfig(baselineConfig)
-    setDraftThinkModel(baselineThinkModel)
     setSaveError(null)
     setSaveHealthWarning('')
-  }, [baselineConfig, baselineThinkModel])
+  }, [baselineConfig])
 
   const handleSave = useCallback(async () => {
     const validationError = validateConfig(draftConfig)
@@ -212,12 +202,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     setIsSaving(true)
     setSaveError(null)
     try {
-      const normalizedThinkModel = draftThinkModel.trim()
-      const savedConfig = await onSave(draftConfig, normalizedThinkModel)
+      const savedConfig = await onSave(draftConfig)
       setBaselineConfig(savedConfig)
       setDraftConfig(savedConfig)
-      setBaselineThinkModel(normalizedThinkModel)
-      setDraftThinkModel(normalizedThinkModel)
       try {
         const health = await fetchHealthSummary()
         setSaveHealthWarning(summarizeHealthWarning(health))
@@ -229,7 +216,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     } finally {
       setIsSaving(false)
     }
-  }, [draftConfig, draftThinkModel, onSave])
+  }, [draftConfig, onSave])
 
   const handleClose = useCallback(() => {
     if (hasPendingAccessToken) {
@@ -318,15 +305,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const activePanel = useMemo(() => {
     switch (activeTab) {
       case 'overview':
-        return <GeneralSettings config={draftConfig} thinkModel={draftThinkModel} />
+        return <GeneralSettings config={draftConfig} />
       case 'models':
         return (
           <AISettings
             config={draftConfig}
             onChatConfigChange={handleChatConfigChange}
             onEmbeddingConfigChange={handleEmbeddingConfigChange}
-            chatModeSettings={{ ...chatModeSettings, thinkModel: draftThinkModel }}
-            onThinkModelChange={handleThinkModelChange}
           />
         )
       case 'retrieval':
@@ -353,14 +338,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   }, [
     activeTab,
-    chatModeSettings.fastModel,
     draftConfig,
-    draftThinkModel,
     handleChatConfigChange,
     handleEmbeddingConfigChange,
     handleRetrievalConfigChange,
     handleRetrievalConfigPatch,
-    handleThinkModelChange,
     onCopyMcpToken,
     onLogout,
     onResetMcpToken,

@@ -81,6 +81,9 @@ type ServerConfig struct {
 	EnableHybridSearch             bool
 	EnableSemanticReranker         bool
 	EnableQueryRewrite             bool
+	EnableModelRetrievalPlanner    bool
+	RetrievalPlannerMaxRounds      int
+	RetrievalPlannerTimeoutSeconds int
 	EnableSemanticCache            bool
 	EnableContextCompression       bool
 	OllamaBaseURL                  string
@@ -259,18 +262,20 @@ type MCPJob struct {
 }
 
 type RetrievalConfig struct {
-	DefaultSearchMode        string `json:"defaultSearchMode"`
-	HybridSearchEnabled      bool   `json:"hybridSearchEnabled"`
-	RerankStrategy           string `json:"rerankStrategy"`
-	EnableQueryRewrite       bool   `json:"enableQueryRewrite"`
-	QueryRewriteMaxVariants  int    `json:"queryRewriteMaxVariants"`
-	TopKDocument             int    `json:"topKDocument"`
-	CandidateTopKDocument    int    `json:"candidateTopKDocument"`
-	TopKKnowledgeBase        int    `json:"topKKnowledgeBase"`
-	CandidateTopKAllDocs     int    `json:"candidateTopKAllDocs"`
-	MaxChunksPerDocument     int    `json:"maxChunksPerDocument"`
-	MaxContextChars          int    `json:"maxContextChars"`
-	EnableLowConfidenceBoost bool   `json:"enableLowConfidenceBoost"`
+	DefaultSearchMode           string `json:"defaultSearchMode"`
+	HybridSearchEnabled         bool   `json:"hybridSearchEnabled"`
+	RerankStrategy              string `json:"rerankStrategy"`
+	EnableQueryRewrite          bool   `json:"enableQueryRewrite"`
+	QueryRewriteMaxVariants     int    `json:"queryRewriteMaxVariants"`
+	EnableModelRetrievalPlanner bool   `json:"enableModelRetrievalPlanner"`
+	ModelRetrievalMaxRounds     int    `json:"modelRetrievalMaxRounds"`
+	TopKDocument                int    `json:"topKDocument"`
+	CandidateTopKDocument       int    `json:"candidateTopKDocument"`
+	TopKKnowledgeBase           int    `json:"topKKnowledgeBase"`
+	CandidateTopKAllDocs        int    `json:"candidateTopKAllDocs"`
+	MaxChunksPerDocument        int    `json:"maxChunksPerDocument"`
+	MaxContextChars             int    `json:"maxContextChars"`
+	EnableLowConfidenceBoost    bool   `json:"enableLowConfidenceBoost"`
 }
 
 type AppConfig struct {

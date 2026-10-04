@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import type { ChatSourceMetadata, CitationSupportMetadata } from '../../App'
 import { chunkKindLabel } from '../knowledge/knowledgeLabels'
 import { filterDocumentCitationSources } from './citationSources'
+import { citationScoreHelpText } from '../settings/retrievalHelp'
 
 interface MessageCitationsProps {
   sources: ChatSourceMetadata[]
@@ -94,7 +95,15 @@ const MessageCitations: React.FC<MessageCitationsProps> = ({
               <strong>{source.documentName || '未知来源'}</strong>
               <span>{sourceTypeLabel(source)}</span>
               <span>{sourceRankLabel(source, index)}</span>
-              {scoreLabel(source.score) && <span>{scoreLabel(source.score)}</span>}
+              {scoreLabel(source.score) && (
+                <span
+                  className="message-citation-score"
+                  title={citationScoreHelpText}
+                  aria-label={`${scoreLabel(source.score)}。${citationScoreHelpText}`}
+                >
+                  {scoreLabel(source.score)}
+                </span>
+              )}
               {source.documentId && (
                 <button
                   type="button"

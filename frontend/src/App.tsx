@@ -207,6 +207,8 @@ export interface RetrievalConfig {
   rerankStrategy: 'keyword' | 'semantic'
   enableQueryRewrite: boolean
   queryRewriteMaxVariants: number
+  enableModelRetrievalPlanner: boolean
+  modelRetrievalMaxRounds: number
   topKDocument: number
   candidateTopKDocument: number
   topKKnowledgeBase: number
@@ -226,11 +228,6 @@ export interface AppConfig {
 export type ChatMode = 'fast' | 'think'
 export type ChatContentMode = 'default' | 'full_table'
 export type WorkspaceView = 'chat' | 'knowledge' | 'settings'
-
-export interface ChatModeSettings {
-  fastModel: string
-  thinkModel: string
-}
 
 const FALLBACK_REQUEST_TIMEOUT_MS = 180_000
 const STREAM_FIRST_CHUNK_TIMEOUT_MS = 30_000
@@ -460,9 +457,7 @@ function AppContent() {
     setSidebarOpen,
     chatMode,
     setChatMode,
-    setThinkModel,
-    chatModeSettings,
-  } = useAppPreferencesState(config)
+  } = useAppPreferencesState()
 
   const persistConfigToBackend = async (nextConfig: AppConfig) => {
     const savedConfig = normalizeAppConfig(await updateAppConfig(nextConfig), nextConfig)
@@ -1543,23 +1538,14 @@ function AppContent() {
     }
 
     const nextMessages = [...activeConversation.messages, userMessage]
-    const selectedChatModel =
-      chatMode === 'think'
-        ? chatModeSettings.thinkModel || config.chat.model
-        : chatModeSettings.fastModel || config.chat.model
-
     const requestBody = buildChatRequestBody({
       conversationId,
-      model: selectedChatModel,
       think: chatMode === 'think',
       knowledgeBaseId: activeConversation.knowledgeBaseId,
       documentId: activeConversation.documentId,
       retrievalMode: config.retrieval.defaultSearchMode,
       contentMode: chatContentMode,
-      config: {
-        ...config.chat,
-        model: selectedChatModel,
-      },
+      config: config.chat,
       embedding: config.embedding,
       messages: nextMessages,
     })
@@ -1932,12 +1918,7 @@ function AppContent() {
     return inputConsumed
   }
 
-  const handleSaveSettings = async (nextConfig: AppConfig, nextThinkModel: string) => {
-    const savedConfig = await persistConfigToBackend(nextConfig)
-    const normalizedThinkModel = nextThinkModel.trim()
-    setThinkModel(normalizedThinkModel)
-    return savedConfig
-  }
+  const handleSaveSettings = async (nextConfig: AppConfig) => persistConfigToBackend(nextConfig)
 
   const handleChangeWorkspace = (workspace: WorkspaceView) => {
     setActiveWorkspace(workspace)
@@ -1997,7 +1978,6 @@ function AppContent() {
             selectedDocument={selectedDocument}
             config={config}
             chatMode={chatMode}
-            chatModeSettings={chatModeSettings}
             isLoading={streamingConversationId === activeConversation?.id}
             isGlobalGenerating={Boolean(streamingConversationId)}
             generatingConversationTitle={generatingConversationTitle}
@@ -2057,7 +2037,6 @@ function AppContent() {
           <SettingsPanel
             config={config}
             onClose={() => handleChangeWorkspace('chat')}
-            chatModeSettings={chatModeSettings}
             onSave={handleSaveSettings}
             onCopyMcpToken={handleCopyMcpToken}
             onResetMcpToken={handleResetMcpToken}

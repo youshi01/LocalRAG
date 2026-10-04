@@ -148,6 +148,97 @@ func FormatStructuredDataMarkdown(result StructuredDataQueryResult) string {
 	return strings.TrimSpace(builder.String())
 }
 
+// StructuredDataCitationSources converts document-level structured sources
+// into the same renderable citation contract used by vector retrieval. Full
+// table mode bypasses the LLM and therefore does not go through
+// RagService.BuildContext, which is normally where chunkId and snippet are
+// attached to sources.
+func StructuredDataCitationSources(result StructuredDataQueryResult, sources []map[string]string) []map[string]string {
+	if len(sources) == 0 {
+		return nil
+	}
+
+	rowsByDocument := make(map[string][]StructuredDataResultRow)
+	for _, row := range result.Rows {
+		documentID := strings.TrimSpace(row.DocumentID)
+		if documentID == "" {
+			continue
+		}
+		rowsByDocument[documentID] = append(rowsByDocument[documentID], row)
+	}
+
+	citationSources := make([]map[string]string, 0, len(sources))
+	seenDocuments := make(map[string]struct{}, len(sources))
+	for _, rawSource := range sources {
+		documentID := strings.TrimSpace(rawSource["documentId"])
+		if documentID == "" {
+			continue
+		}
+		if _, seen := seenDocuments[documentID]; seen {
+			continue
+		}
+		seenDocuments[documentID] = struct{}{}
+
+		snippet := structuredDataCitationSnippet(result, rowsByDocument[documentID])
+		if strings.TrimSpace(snippet) == "" {
+			continue
+		}
+
+		source := cloneEvidenceSource(rawSource)
+		chunkID := fmt.Sprintf("structured-full-table-%s", documentID)
+		chunk := DocumentChunk{
+			ID:              chunkID,
+			KnowledgeBaseID: strings.TrimSpace(source["knowledgeBaseId"]),
+			DocumentID:      documentID,
+			DocumentName:    strings.TrimSpace(source["documentName"]),
+			Text:            snippet,
+			Index:           0,
+			Kind:            "structured_table",
+		}
+		source["chunkId"] = chunkID
+		source["evidenceId"] = evidenceIDForChunk(chunk)
+		source["chunkIndex"] = "1"
+		source["chunkKind"] = "structured_table"
+		source["score"] = "1.0000"
+		source["snippet"] = truncateRunes(snippet, 2400)
+		if len(result.Columns) > 0 {
+			source["tableColumns"] = strings.Join(result.Columns, ",")
+		}
+		citationSources = append(citationSources, source)
+	}
+	return citationSources
+}
+
+func structuredDataCitationSnippet(result StructuredDataQueryResult, rows []StructuredDataResultRow) string {
+	if len(rows) == 0 {
+		return strings.TrimSpace(structuredDataResultText(result, nil))
+	}
+
+	lines := make([]string, 0, len(rows))
+	for _, row := range rows {
+		values := make([]string, 0, len(result.Columns))
+		for _, column := range result.Columns {
+			value := strings.TrimSpace(row.Values[column])
+			if value == "" {
+				continue
+			}
+			values = append(values, fmt.Sprintf("%s：%s", column, value))
+		}
+		if len(values) == 0 {
+			continue
+		}
+		location := fmt.Sprintf("第%d行", row.RowNumber)
+		if sheet := strings.TrimSpace(row.Sheet); sheet != "" {
+			location = fmt.Sprintf("工作表《%s》第%d行", sheet, row.RowNumber)
+		}
+		lines = append(lines, fmt.Sprintf("%s：%s", location, strings.Join(values, "；")))
+	}
+	if len(lines) == 0 {
+		return strings.TrimSpace(structuredDataResultText(result, nil))
+	}
+	return strings.Join(lines, "\n")
+}
+
 func escapeMarkdownTableCell(value string) string {
 	value = strings.ReplaceAll(strings.TrimSpace(value), "|", "\\|")
 	value = strings.ReplaceAll(value, "\r\n", "<br>")

@@ -141,6 +141,7 @@ type AppService struct {
 	stateSaveMu           sync.Mutex
 	reranker              SemanticReranker
 	queryRewriter         QueryRewriter
+	retrievalPlanner      RetrievalPlanner
 	semanticCache         *SemanticCache
 	contextCompressor     ContextCompressor
 	retrievalOrchestrator *RetrievalOrchestrator
@@ -345,6 +346,12 @@ func NewAppServiceWithJobStore(qdrant *QdrantService, store *AppStateStore, chat
 
 	llmService := NewLLMService()
 	service.SetQueryRewriter(NewLLMQueryRewriter(llmService, 3))
+	plannerTimeout := time.Duration(serverConfig.RetrievalPlannerTimeoutSeconds) * time.Second
+	planner := NewLLMRetrievalPlanner(llmService, 4, plannerTimeout)
+	planner.SetChatConfigProvider(func() model.ChatModelConfig {
+		return service.currentChatConfig()
+	})
+	service.SetRetrievalPlanner(planner)
 	if serverConfig.EnableContextCompression {
 		service.SetContextCompressor(NewLLMContextCompressor(llmService, 800))
 	}
@@ -953,6 +960,8 @@ func normalizeRetrievalConfig(cfg model.RetrievalConfig, serverConfig model.Serv
 		strings.TrimSpace(cfg.RerankStrategy) == "" &&
 		!cfg.EnableQueryRewrite &&
 		cfg.QueryRewriteMaxVariants == 0 &&
+		!cfg.EnableModelRetrievalPlanner &&
+		cfg.ModelRetrievalMaxRounds == 0 &&
 		cfg.TopKDocument == 0 &&
 		cfg.CandidateTopKDocument == 0 &&
 		cfg.TopKKnowledgeBase == 0 &&
@@ -977,6 +986,13 @@ func normalizeRetrievalConfig(cfg model.RetrievalConfig, serverConfig model.Serv
 	queryRewriteMaxVariants := cfg.QueryRewriteMaxVariants
 	if queryRewriteMaxVariants <= 0 {
 		queryRewriteMaxVariants = 3
+	}
+	modelRetrievalMaxRounds := cfg.ModelRetrievalMaxRounds
+	if modelRetrievalMaxRounds <= 0 {
+		modelRetrievalMaxRounds = serverConfig.RetrievalPlannerMaxRounds
+	}
+	if modelRetrievalMaxRounds <= 0 {
+		modelRetrievalMaxRounds = 2
 	}
 	topKDocument := cfg.TopKDocument
 	if topKDocument <= 0 {
@@ -1023,25 +1039,32 @@ func normalizeRetrievalConfig(cfg model.RetrievalConfig, serverConfig model.Serv
 	hybridSearchEnabled := cfg.HybridSearchEnabled
 	enableLowConfidenceBoost := cfg.EnableLowConfidenceBoost
 	enableQueryRewrite := cfg.EnableQueryRewrite
+	enableModelRetrievalPlanner := cfg.EnableModelRetrievalPlanner
+	if cfg.ModelRetrievalMaxRounds <= 0 {
+		enableModelRetrievalPlanner = serverConfig.EnableModelRetrievalPlanner
+	}
 	if emptyConfig {
 		hybridSearchEnabled = serverConfig.EnableHybridSearch
 		enableLowConfidenceBoost = serverConfig.RetrievalEnableAutoExpand
 		enableQueryRewrite = serverConfig.EnableQueryRewrite
+		enableModelRetrievalPlanner = serverConfig.EnableModelRetrievalPlanner
 	}
 
 	return model.RetrievalConfig{
-		DefaultSearchMode:        mode,
-		HybridSearchEnabled:      hybridSearchEnabled,
-		RerankStrategy:           rerankStrategy,
-		EnableQueryRewrite:       enableQueryRewrite,
-		QueryRewriteMaxVariants:  minInt(maxInt(queryRewriteMaxVariants, 1), 5),
-		TopKDocument:             topKDocument,
-		CandidateTopKDocument:    maxInt(candidateTopKDocument, topKDocument),
-		TopKKnowledgeBase:        topKKnowledgeBase,
-		CandidateTopKAllDocs:     maxInt(candidateTopKAllDocs, topKKnowledgeBase),
-		MaxChunksPerDocument:     maxChunksPerDocument,
-		MaxContextChars:          maxContextChars,
-		EnableLowConfidenceBoost: enableLowConfidenceBoost,
+		DefaultSearchMode:           mode,
+		HybridSearchEnabled:         hybridSearchEnabled,
+		RerankStrategy:              rerankStrategy,
+		EnableQueryRewrite:          enableQueryRewrite,
+		QueryRewriteMaxVariants:     minInt(maxInt(queryRewriteMaxVariants, 1), 5),
+		EnableModelRetrievalPlanner: enableModelRetrievalPlanner,
+		ModelRetrievalMaxRounds:     minInt(maxInt(modelRetrievalMaxRounds, 1), 2),
+		TopKDocument:                topKDocument,
+		CandidateTopKDocument:       maxInt(candidateTopKDocument, topKDocument),
+		TopKKnowledgeBase:           topKKnowledgeBase,
+		CandidateTopKAllDocs:        maxInt(candidateTopKAllDocs, topKKnowledgeBase),
+		MaxChunksPerDocument:        maxChunksPerDocument,
+		MaxContextChars:             maxContextChars,
+		EnableLowConfidenceBoost:    enableLowConfidenceBoost,
 	}
 }
 
@@ -1051,6 +1074,9 @@ func validateRetrievalConfig(cfg model.RetrievalConfig) error {
 	}
 	if cfg.QueryRewriteMaxVariants < 1 || cfg.QueryRewriteMaxVariants > 5 {
 		return fmt.Errorf("query rewrite max variants must be between 1 and 5")
+	}
+	if cfg.ModelRetrievalMaxRounds < 1 || cfg.ModelRetrievalMaxRounds > 2 {
+		return fmt.Errorf("model retrieval max rounds must be between 1 and 2")
 	}
 	if cfg.TopKDocument < 1 || cfg.TopKDocument > 30 {
 		return fmt.Errorf("document topK must be between 1 and 30")
@@ -4681,6 +4707,11 @@ func (s *AppService) BuildChatContext(req model.ChatCompletionRequest, relevantD
 			}
 			for _, document := range kb.Documents {
 				if document.ID == req.DocumentID {
+					if len(relevantDocumentIDs) == 0 && isOpenEndedKnowledgeQuery(latestUserMessage(req.Messages)) {
+						if contextText, sources, ok := s.buildIndexedDocumentFallbackContext(kb, document); ok {
+							return contextText, sources, nil
+						}
+					}
 					return fmt.Sprintf("当前问答范围为文档《%s》，所属知识库为“%s”。文档摘要：%s", document.Name, kb.Name, document.ContentPreview), []map[string]string{{
 						"knowledgeBaseId": kb.ID,
 						"documentId":      document.ID,
@@ -4709,6 +4740,11 @@ func (s *AppService) BuildChatContext(req model.ChatCompletionRequest, relevantD
 		if matchedDocument == nil || matchedKnowledgeBase == nil {
 			return "", nil, fmt.Errorf("document not found")
 		}
+		if len(relevantDocumentIDs) == 0 && isOpenEndedKnowledgeQuery(latestUserMessage(req.Messages)) {
+			if contextText, sources, ok := s.buildIndexedDocumentFallbackContext(*matchedKnowledgeBase, *matchedDocument); ok {
+				return contextText, sources, nil
+			}
+		}
 		return fmt.Sprintf("当前问答范围为文档《%s》，所属知识库为“%s”。文档摘要：%s", matchedDocument.Name, matchedKnowledgeBase.Name, matchedDocument.ContentPreview), []map[string]string{{
 			"knowledgeBaseId": matchedKnowledgeBase.ID,
 			"documentId":      matchedDocument.ID,
@@ -4729,29 +4765,80 @@ func (s *AppService) BuildChatContext(req model.ChatCompletionRequest, relevantD
 			}
 		}
 
+		question := latestUserMessage(req.Messages)
+		useIndexedFallback := len(relevantIDs) == 0 && isOpenEndedKnowledgeQuery(question)
 		summaryLines := []string{fmt.Sprintf("当前问答范围为知识库“%s”，其中包含 %d 份文档。", kb.Name, len(kb.Documents))}
-		previewDocuments := make([]model.Document, 0, minInt(len(relevantIDs), 3))
+		previewDocuments := make([]model.Document, 0, minInt(len(kb.Documents), 3))
 		for _, document := range kb.Documents {
-			if _, ok := relevantIDs[document.ID]; !ok {
-				continue
+			if len(relevantIDs) > 0 {
+				if _, ok := relevantIDs[document.ID]; !ok {
+					continue
+				}
 			}
 			previewDocuments = append(previewDocuments, document)
 			if len(previewDocuments) >= 3 {
 				break
 			}
 		}
+
+		previewSources := make([]map[string]string, 0, len(previewDocuments))
 		if len(previewDocuments) > 0 {
-			summaryLines = append(summaryLines, "文档概览：")
-			for _, document := range previewDocuments {
-				preview := truncateRunes(strings.TrimSpace(document.ContentPreview), 120)
-				if preview == "" {
-					preview = "暂无内容预览"
+			if len(relevantIDs) == 0 {
+				if useIndexedFallback {
+					summaryLines = append(summaryLines, "未命中具体片段，以下为已索引原文兜底；内容可能按上下文上限截断，但不再只使用文档摘要：")
+				} else {
+					summaryLines = append(summaryLines, "未命中具体片段，以下为文档摘要兜底，仅用于辅助回答，不代表全文：")
 				}
-				summaryLines = append(summaryLines, fmt.Sprintf("- %s：%s", document.Name, preview))
+			} else {
+				summaryLines = append(summaryLines, "文档概览：")
+			}
+			fallbackBudget := 0
+			if useIndexedFallback {
+				fallbackBudget = s.serverConfig.RetrievalMaxContextChars
+				if fallbackBudget <= 0 {
+					fallbackBudget = 8000
+				}
+				fallbackBudget = maxInt(1200, fallbackBudget/maxInt(1, len(previewDocuments)))
+			}
+			for _, document := range previewDocuments {
+				previewText := strings.TrimSpace(document.ContentPreview)
+				chunkKind := "document_preview"
+				if useIndexedFallback {
+					if indexedText, ok := s.loadIndexedDocumentContent(document); ok {
+						previewText = truncateRunes(indexedText, fallbackBudget)
+						chunkKind = "indexed_content_fallback"
+					}
+				}
+				if previewText == "" {
+					continue
+				}
+				previewLine := truncateRunes(previewText, 160)
+				summaryLines = append(summaryLines, fmt.Sprintf("- %s：%s", document.Name, previewLine))
+
+				chunk := DocumentChunk{
+					ID:              document.ID + "#" + chunkKind,
+					KnowledgeBaseID: kb.ID,
+					DocumentID:      document.ID,
+					DocumentName:    document.Name,
+					Text:            previewText,
+					Kind:            chunkKind,
+					Index:           0,
+				}
+				previewSources = append(previewSources, map[string]string{
+					"knowledgeBaseId": kb.ID,
+					"documentId":      document.ID,
+					"documentName":    document.Name,
+					"chunkId":         chunk.ID,
+					"chunkIndex":      "1",
+					"chunkKind":       chunk.Kind,
+					"score":           "0.0000",
+					"snippet":         truncateRunes(previewText, 220),
+					"evidenceId":      evidenceIDForChunk(chunk),
+				})
 			}
 		}
 
-		return strings.Join(summaryLines, "\n"), nil, nil
+		return strings.Join(summaryLines, "\n"), previewSources, nil
 	}
 
 	if len(s.state.KnowledgeBases) == 0 {
@@ -4765,6 +4852,71 @@ func (s *AppService) BuildChatContext(req model.ChatCompletionRequest, relevantD
 	sort.Strings(kbNames)
 
 	return "当前未限定知识库范围，系统将默认使用全部知识库作为后续检索候选。当前知识库包括：" + strings.Join(kbNames, "、"), nil, nil
+}
+
+func (s *AppService) loadIndexedDocumentContent(document model.Document) (string, bool) {
+	if s == nil || s.indexedContentStore == nil {
+		return "", false
+	}
+	artifact, found, err := s.indexedContentStore.Load(document)
+	if err != nil {
+		log.Printf("failed to load indexed content for document %s: %v", document.ID, err)
+		return "", false
+	}
+	if !found || strings.TrimSpace(artifact.Content) == "" {
+		return "", false
+	}
+	return strings.TrimSpace(artifact.Content), true
+}
+
+func (s *AppService) buildIndexedDocumentFallbackContext(kb model.KnowledgeBase, document model.Document) (string, []map[string]string, bool) {
+	content, ok := s.loadIndexedDocumentContent(document)
+	if !ok {
+		return "", nil, false
+	}
+
+	maxChars := s.serverConfig.RetrievalMaxContextChars
+	if maxChars <= 0 {
+		maxChars = 8000
+	}
+	contentRunes := []rune(content)
+	truncated := len(contentRunes) > maxChars
+	content = truncateRunes(content, maxChars)
+	chunk := DocumentChunk{
+		ID:              document.ID + "#indexed-fallback",
+		KnowledgeBaseID: kb.ID,
+		DocumentID:      document.ID,
+		DocumentName:    document.Name,
+		Text:            content,
+		Kind:            "indexed_content_fallback",
+		Index:           0,
+		CharStart:       0,
+		CharEnd:         len([]rune(content)),
+	}
+	source := map[string]string{
+		"knowledgeBaseId": kb.ID,
+		"documentId":      document.ID,
+		"documentName":    document.Name,
+		"chunkId":         chunk.ID,
+		"chunkIndex":      "1",
+		"chunkKind":       chunk.Kind,
+		"score":           "0.0000",
+		"snippet":         truncateRunes(content, 220),
+		"evidenceId":      evidenceIDForChunk(chunk),
+	}
+	truncationNote := ""
+	if truncated {
+		truncationNote = fmt.Sprintf("（已按 %d 字符上下文上限截断）", maxChars)
+	}
+	contextText := fmt.Sprintf(
+		"当前问答范围为文档《%s》，所属知识库为“%s”。\n未命中具体检索片段，以下为已索引原文兜底%s；建议只基于其中可核对的事实回答，并将推导出的实施建议单独标注：\n[%s#1] %s",
+		document.Name,
+		kb.Name,
+		truncationNote,
+		document.Name,
+		content,
+	)
+	return contextText, []map[string]string{source}, true
 }
 
 func (s *AppService) ensureKnowledgeBaseCollection(knowledgeBaseID string) error {
@@ -5284,6 +5436,15 @@ func (s *AppService) SetQueryRewriter(rewriter QueryRewriter) {
 	}
 }
 
+func (s *AppService) SetRetrievalPlanner(planner RetrievalPlanner) {
+	s.retrievalPlanner = planner
+	if setter, ok := planner.(interface {
+		SetChatConfigProvider(func() model.ChatModelConfig)
+	}); ok {
+		setter.SetChatConfigProvider(s.currentChatConfig)
+	}
+}
+
 func (s *AppService) SetSemanticCache(cache *SemanticCache) {
 	s.semanticCache = cache
 }
@@ -5485,6 +5646,10 @@ func (s *AppService) retrieveRelevantChunks(req model.ChatCompletionRequest, que
 }
 
 func (s *AppService) retrieveRelevantChunksWithContext(ctx context.Context, req model.ChatCompletionRequest, queryVector []float64) ([]RetrievedChunk, error) {
+	return s.retrieveRelevantChunksWithQueries(ctx, req, queryVector, nil)
+}
+
+func (s *AppService) retrieveRelevantChunksWithQueries(ctx context.Context, req model.ChatCompletionRequest, queryVector []float64, plannerQueries []string) ([]RetrievedChunk, error) {
 	if s.qdrant == nil || !s.qdrant.IsEnabled() {
 		return nil, nil
 	}
@@ -5523,7 +5688,17 @@ func (s *AppService) retrieveRelevantChunksWithContext(ctx context.Context, req 
 		}
 	}
 
-	if s.queryRewriteEnabledForRequest(req) {
+	var multiQuerySearches []string
+	if len(plannerQueries) > 0 {
+		multiQuerySearches = limitRetrievalQueries(
+			mergeRetrievalQueries([]string{query}, plannerQueries),
+			maxMultiQuerySearchQueries,
+		)
+		logRetrievalStageMetrics(req, query, "model_retrieval_queries", time.Now(), map[string]any{
+			"status":  "ok",
+			"queries": len(multiQuerySearches),
+		})
+	} else if s.queryRewriteEnabledForRequest(req) {
 		if setter, ok := s.queryRewriter.(interface {
 			SetChatConfigProvider(func() model.ChatModelConfig)
 		}); ok {
@@ -5549,90 +5724,14 @@ func (s *AppService) retrieveRelevantChunksWithContext(ctx context.Context, req 
 				"status":  "ok",
 				"queries": len(rewriteResult.RewrittenQueries),
 			})
-			queries := limitRetrievalQueries(
+			multiQuerySearches = limitRetrievalQueries(
 				mergeRetrievalQueries([]string{query}, rewriteResult.RewrittenQueries),
 				maxMultiQuerySearchQueries,
 			)
-			embeddingConfig := s.resolveEmbeddingConfig(req)
-
-			candidates := make([]RetrievedChunk, 0)
-			seenChunkIDs := make(map[string]struct{})
-			for _, knowledgeBaseID := range knowledgeBaseIDs {
-				filter := map[string]any{}
-				if documentID := strings.TrimSpace(req.DocumentID); documentID != "" {
-					filter = map[string]any{
-						"must": []map[string]any{{
-							"key":   "document_id",
-							"match": map[string]any{"value": documentID},
-						}},
-					}
-				}
-				filter = s.withCurrentIndexFenceFilter(knowledgeBaseID, filter, req.DocumentID)
-				results, err := s.rag.MultiQuerySearchWithFilter(ctx, queries, knowledgeBaseID, params.candidateTopK, 0, embeddingConfig, filter)
-				if err != nil {
-					return nil, fmt.Errorf("multi query search qdrant collection %s: %w", knowledgeBaseID, err)
-				}
-				for _, item := range results {
-					if strings.TrimSpace(req.DocumentID) != "" && item.DocumentID != req.DocumentID {
-						continue
-					}
-					if _, exists := seenChunkIDs[item.ID]; exists {
-						continue
-					}
-					seenChunkIDs[item.ID] = struct{}{}
-					candidates = append(candidates, item)
-				}
-			}
-			candidates = s.filterRetrievedChunksToScope(req, knowledgeBaseIDs, candidates)
-			selected := s.applySelectionStrategy(req, query, ctx, candidates, params)
-
-			if autoExpand && strings.TrimSpace(req.DocumentID) == "" && isLowConfidenceSelection(query, selected) {
-				expandedCandidateTopK := params.candidateTopK * 2
-				expandedCandidates := make([]RetrievedChunk, 0)
-				seenChunkIDs = make(map[string]struct{})
-				for _, knowledgeBaseID := range knowledgeBaseIDs {
-					filter := map[string]any{}
-					if documentID := strings.TrimSpace(req.DocumentID); documentID != "" {
-						filter = map[string]any{
-							"must": []map[string]any{{
-								"key":   "document_id",
-								"match": map[string]any{"value": documentID},
-							}},
-						}
-					}
-					filter = s.withCurrentIndexFenceFilter(knowledgeBaseID, filter, req.DocumentID)
-					results, err := s.rag.MultiQuerySearchWithFilter(ctx, queries, knowledgeBaseID, expandedCandidateTopK, 0, embeddingConfig, filter)
-					if err != nil {
-						continue
-					}
-					for _, item := range results {
-						if strings.TrimSpace(req.DocumentID) != "" && item.DocumentID != req.DocumentID {
-							continue
-						}
-						if _, exists := seenChunkIDs[item.ID]; exists {
-							continue
-						}
-						seenChunkIDs[item.ID] = struct{}{}
-						expandedCandidates = append(expandedCandidates, item)
-					}
-				}
-				expandedCandidates = s.filterRetrievedChunksToScope(req, knowledgeBaseIDs, expandedCandidates)
-				if len(expandedCandidates) > 0 {
-					expandedParams := params
-					expandedParams.perDocumentLimit++
-					expandedSelected := s.applySelectionStrategy(req, query, ctx, expandedCandidates, expandedParams)
-					if selectionQuality(expandedSelected) > selectionQuality(selected) {
-						selected = expandedSelected
-					}
-				}
-			}
-
-			if s.semanticCache != nil && len(queryEmbedding) > 0 {
-				s.semanticCache.Set(cacheScope, queryEmbedding, query, selected)
-			}
-			logRetrievalMetrics(req, query, params, candidates, selected)
-			return selected, nil
 		}
+	}
+	if len(multiQuerySearches) > 0 {
+		return s.retrieveMultiQueryChunksWithContext(ctx, req, query, knowledgeBaseIDs, params, autoExpand, cacheScope, queryEmbedding, multiQuerySearches)
 	}
 
 	useHybrid := s.shouldUseHybridSearch(req)
@@ -5688,18 +5787,112 @@ func (s *AppService) retrieveRelevantChunksWithContext(ctx context.Context, req 
 	return selected, nil
 }
 
+func (s *AppService) retrieveMultiQueryChunksWithContext(
+	ctx context.Context,
+	req model.ChatCompletionRequest,
+	query string,
+	knowledgeBaseIDs []string,
+	params retrievalParams,
+	autoExpand bool,
+	cacheScope string,
+	queryEmbedding []float32,
+	queries []string,
+) ([]RetrievedChunk, error) {
+	embeddingConfig := s.resolveEmbeddingConfig(req)
+
+	candidates := make([]RetrievedChunk, 0)
+	seenChunkIDs := make(map[string]struct{})
+	for _, knowledgeBaseID := range knowledgeBaseIDs {
+		filter := map[string]any{}
+		if documentID := strings.TrimSpace(req.DocumentID); documentID != "" {
+			filter = map[string]any{
+				"must": []map[string]any{{
+					"key":   "document_id",
+					"match": map[string]any{"value": documentID},
+				}},
+			}
+		}
+		filter = s.withCurrentIndexFenceFilter(knowledgeBaseID, filter, req.DocumentID)
+		results, err := s.rag.MultiQuerySearchWithFilter(ctx, queries, knowledgeBaseID, params.candidateTopK, 0, embeddingConfig, filter)
+		if err != nil {
+			return nil, fmt.Errorf("multi query search qdrant collection %s: %w", knowledgeBaseID, err)
+		}
+		for _, item := range results {
+			if strings.TrimSpace(req.DocumentID) != "" && item.DocumentID != req.DocumentID {
+				continue
+			}
+			if _, exists := seenChunkIDs[item.ID]; exists {
+				continue
+			}
+			seenChunkIDs[item.ID] = struct{}{}
+			candidates = append(candidates, item)
+		}
+	}
+	candidates = s.filterRetrievedChunksToScope(req, knowledgeBaseIDs, candidates)
+	selected := s.applySelectionStrategy(req, query, ctx, candidates, params)
+
+	if autoExpand && strings.TrimSpace(req.DocumentID) == "" && isLowConfidenceSelection(query, selected) {
+		expandedCandidateTopK := params.candidateTopK * 2
+		expandedCandidates := make([]RetrievedChunk, 0)
+		seenChunkIDs = make(map[string]struct{})
+		for _, knowledgeBaseID := range knowledgeBaseIDs {
+			filter := map[string]any{}
+			if documentID := strings.TrimSpace(req.DocumentID); documentID != "" {
+				filter = map[string]any{
+					"must": []map[string]any{{
+						"key":   "document_id",
+						"match": map[string]any{"value": documentID},
+					}},
+				}
+			}
+			filter = s.withCurrentIndexFenceFilter(knowledgeBaseID, filter, req.DocumentID)
+			results, err := s.rag.MultiQuerySearchWithFilter(ctx, queries, knowledgeBaseID, expandedCandidateTopK, 0, embeddingConfig, filter)
+			if err != nil {
+				continue
+			}
+			for _, item := range results {
+				if strings.TrimSpace(req.DocumentID) != "" && item.DocumentID != req.DocumentID {
+					continue
+				}
+				if _, exists := seenChunkIDs[item.ID]; exists {
+					continue
+				}
+				seenChunkIDs[item.ID] = struct{}{}
+				expandedCandidates = append(expandedCandidates, item)
+			}
+		}
+		expandedCandidates = s.filterRetrievedChunksToScope(req, knowledgeBaseIDs, expandedCandidates)
+		if len(expandedCandidates) > 0 {
+			expandedParams := params
+			expandedParams.perDocumentLimit++
+			expandedSelected := s.applySelectionStrategy(req, query, ctx, expandedCandidates, expandedParams)
+			if selectionQuality(expandedSelected) > selectionQuality(selected) {
+				selected = expandedSelected
+			}
+		}
+	}
+
+	if s.semanticCache != nil && len(queryEmbedding) > 0 {
+		s.semanticCache.Set(cacheScope, queryEmbedding, query, selected)
+	}
+	logRetrievalMetrics(req, query, params, candidates, selected)
+	return selected, nil
+}
+
 func (s *AppService) retrievalCacheScope(req model.ChatCompletionRequest, knowledgeBaseIDs []string) string {
 	ids := append([]string(nil), knowledgeBaseIDs...)
 	sort.Strings(ids)
 	cfg := s.retrievalConfigForRequest(req)
 	return fmt.Sprintf(
-		"kb=%s|doc=%s|mode=%s|rerank=%s|rewrite=%t|variants=%d",
+		"kb=%s|doc=%s|mode=%s|rerank=%s|rewrite=%t|variants=%d|planner=%t|planner_rounds=%d",
 		strings.Join(ids, ","),
 		strings.TrimSpace(req.DocumentID),
 		s.resolvedRetrievalSearchMode(req),
 		cfg.RerankStrategy,
 		cfg.EnableQueryRewrite,
 		cfg.QueryRewriteMaxVariants,
+		cfg.EnableModelRetrievalPlanner,
+		cfg.ModelRetrievalMaxRounds,
 	)
 }
 

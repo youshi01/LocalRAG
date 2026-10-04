@@ -22,6 +22,7 @@ LocalRAG 适合个人或小团队在本地环境、自托管环境中快速搭�
 - 知识库管理：创建、删除知识库，查看文档列表
 - 文档上传与索引：支持 TXT、Markdown、PDF、xlsx、csv 文件上传与解析
 - 检索增强问答：基于 Qdrant 做向量检索并把命中内容注入对话上下文
+- 模型辅助检索：先由聊天模型判断是否需要知识库，生成有限检索表达；模型不可用时自动回退确定性检索
 - 宽松检索默认：默认扩大候选、片段和上下文范围，设置页会显示参数含义与资源消耗提示
 - 完整表格查询：选中 CSV/XLSX 知识库后可切换“完整表格查询”，直接按表头和数据行展示结构化内容
 - 聊天记录持久化：会话消息保存到本地 SQLite 数据库
@@ -37,6 +38,7 @@ LocalRAG 适合个人或小团队在本地环境、自托管环境中快速搭�
 - 低置信度场景二次扩召回
 - 嵌入缓存与可选语义缓存
 - 可选 Hybrid Search、Semantic Reranker、Query Rewrite、Context Compression
+- 模型辅助检索最多规划两轮，首轮证据不足时最多补检索一次，不改变知识库/文档范围和证据门控
 - 可从现有知识库文档生成 RAG 评估数据集，用于小样本效果验证
 
 ---
@@ -87,7 +89,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-常用运行配置已集中在 `.env.example`。其中 `QDRANT_VECTOR_SIZE` 必须与 Embedding 模型维度一致；如果你更换了不同维度的 Embedding 模型，需要换新的 `QDRANT_COLLECTION_PREFIX` 或重建旧集合。开启 `ENABLE_HYBRID_SEARCH` 前也建议换新前缀并重建索引，以便 Qdrant collection 使用 named dense/sparse vectors。
+常用运行配置已集中在 `.env.example`。其中 `ENABLE_MODEL_RETRIEVAL_PLANNER=true` 会启用模型辅助检索，`RETRIEVAL_PLANNER_MAX_ROUNDS` 控制最多 1-2 轮规划，`RETRIEVAL_PLANNER_TIMEOUT_SECONDS` 控制每轮超时；模型规划失败、超时或 JSON 不合法时会自动回退到原有检索。`QDRANT_VECTOR_SIZE` 必须与 Embedding 模型维度一致；如果你更换了不同维度的 Embedding 模型，需要换新的 `QDRANT_COLLECTION_PREFIX` 或重建旧集合。开启 `ENABLE_HYBRID_SEARCH` 前也建议换新前缀并重建索引，以便 Qdrant collection 使用 named dense/sparse vectors。
 
 Docker 自托管建议设置：
 
@@ -184,6 +186,14 @@ Docker Desktop（Windows）中的后端访问宿主机 Ollama 时，Base URL 使
 - Model: `nomic-embed-text`
 - API Key: 留空
 
+### 思考模式
+
+聊天界面用一个“思考”开关控制当前聊天模型，不再配置第二个思考模型。
+普通与思考回答共用模型、服务地址和凭据，Embedding 不参与该开关。
+Ollama 原生接口使用 `think` 参数；模型服务须支持该能力。
+通用 OpenAI Compatible 思考参数尚未适配时会明确报错，而非静默忽略；
+关闭思考开关后普通聊天不受影响。详见 [使用指南](docs/getting-started.md#聊天思考开关)。
+
 ### 模型发现与健康探测
 
 设置页中的 Base URL 必须填写**服务根地址**，而不是具体模型 API 路径：Ollama 例如
@@ -198,6 +208,7 @@ Docker Desktop（Windows）中的后端访问宿主机 Ollama 时，Base URL 使
 - **Embedding 模型指纹**：更换 Embedding 模型、服务地址或向量维度后，即使维度相同也会标记已有文档需要重新索引，避免新旧向量混用。
 - **Chat 与 Embedding 独立**：Embedding 不要求使用本机 Ollama，可以配置公网、公司内网或其他 OpenAI Compatible 服务。能调用 Chat 接口不代表同一服务也提供 Embedding 接口，必要时请为 Chat 和 Embedding 分别配置地址与模型。
 - **Embedding 接口要求**：如果服务返回 `This server does not support embeddings. Start it with --embeddings`，请在该服务启动时启用 embeddings，或把 Embedding 配置改为支持 `/v1/embeddings`（Ollama 使用 `/api/embed`）的服务。
+- **模型辅助检索说明**：该功能只让 Chat 模型输出“是否检索、检索意图和查询表达”的结构化计划，不把模型思维链传给前端；知识库仍由 Qdrant 和结构化查询执行，最终回答仍受引用支持度检查约束。
 
 ### OpenAI Compatible 示例
 

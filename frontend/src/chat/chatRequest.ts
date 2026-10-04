@@ -18,7 +18,6 @@ export interface ChatRequestBody {
 
 export const buildChatRequestBody = (input: {
   conversationId: string
-  model: string
   think: boolean
   knowledgeBaseId: string
   documentId: string
@@ -29,7 +28,7 @@ export const buildChatRequestBody = (input: {
   messages: ChatMessage[]
 }): ChatRequestBody => ({
   conversationId: input.conversationId,
-  model: input.model,
+  model: input.config.model,
   think: input.think,
   knowledgeBaseId: input.knowledgeBaseId,
   documentId: input.documentId,

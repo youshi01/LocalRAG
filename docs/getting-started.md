@@ -59,6 +59,19 @@ ollama pull nomic-embed-text
 聊天接口可用不代表服务同时提供 Embedding；如果服务提示未启用 embeddings，请启动服务时
 增加 `--embeddings`，或为 Embedding 单独配置支持 `/v1/embeddings` 的服务。
 
+### 聊天思考开关
+
+聊天输入框上方只有一个“思考”开关。开启、关闭都使用设置页当前的聊天模型，
+共用 Provider、Base URL 和 API Key；不再选择、保存或默认下载独立的“思考模型”。
+旧浏览器中的独立思考模型偏好不会再被读取。Embedding 配置和检索向量不受开关影响。
+
+- Ollama 原生接口：显式传递 `think: true` / `think: false`，需要模型与服务支持。
+- 通用 OpenAI Compatible 接入：当前适配器没有统一且已验证的思考控制参数。
+  开启时会明确提示尚未适配，不会静默忽略或替换成另一模型；关闭时普通聊天保持可用。
+  服务自身默认开启的推理行为不等同于 LocalRAG 已能够控制其开关。
+- 温度与上下文消息数量仍是独立的回答参数。思考开关不提升不支持该能力的模型，
+  也不保证知识库回答或引用必然正确。
+
 ### 后端运行（可选）
 
 只有在需要单独调试后端进程时使用：
@@ -154,6 +167,9 @@ docker compose up --build
 | `ENABLE_HYBRID_SEARCH` | `false` | 启用 Hybrid Search |
 | `ENABLE_SEMANTIC_RERANKER` | `false` | 语义重排启动默认值，可在高级检索中切换 |
 | `ENABLE_QUERY_REWRITE` | `false` | Query Rewrite 启动默认值，可在高级检索中开关 |
+| `ENABLE_MODEL_RETRIEVAL_PLANNER` | `true` | 模型先判断是否需要知识库并生成检索表达；失败时自动回退 |
+| `RETRIEVAL_PLANNER_MAX_ROUNDS` | `2` | 模型辅助检索最多规划 1-2 轮，首轮证据不足时最多补检索一次 |
+| `RETRIEVAL_PLANNER_TIMEOUT_SECONDS` | `8` | 每轮模型检索规划超时 |
 | `ENABLE_SEMANTIC_CACHE` | `false` | 启用语义缓存 |
 | `ENABLE_CONTEXT_COMPRESSION` | `false` | 启用上下文压缩 |
 | `ENABLE_MCP` | `false` | 启用内置 MCP Server；服务器部署需同时开启认证 |

@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import type { AppConfig, ChatConfig, ChatModeSettings, EmbeddingConfig } from '../../../App'
+import type { AppConfig, ChatConfig, EmbeddingConfig } from '../../../App'
 import AppIcon from '../../common/AppIcon'
 import { ModelConfigTest } from '../ModelConfigProbe'
 import { getEmbeddingGuide } from '../embeddingGuide'
@@ -11,8 +11,6 @@ interface AISettingsProps {
     key: K,
     value: EmbeddingConfig[K],
   ) => void
-  chatModeSettings: ChatModeSettings
-  onThinkModelChange: (value: string) => void
 }
 
 type ModelSection = 'chat' | 'embedding'
@@ -21,8 +19,6 @@ const AISettings: React.FC<AISettingsProps> = ({
   config,
   onChatConfigChange,
   onEmbeddingConfigChange,
-  chatModeSettings,
-  onThinkModelChange,
 }) => {
   const [activeSection, setActiveSection] = useState<ModelSection>('chat')
   const embeddingGuide = getEmbeddingGuide(config.embedding.provider)
@@ -65,8 +61,8 @@ const AISettings: React.FC<AISettingsProps> = ({
         >
           <section className="settings-form-section">
             <header>
-              <h4>连接</h4>
-              <p>模型服务地址和身份凭据。</p>
+              <h4>模型服务与默认模型</h4>
+              <p>普通回答与思考模式共用这里的聊天模型、地址和凭据。</p>
             </header>
             <div className="settings-form-grid settings-form-grid-dense">
               <div className="settings-form-group">
@@ -129,8 +125,8 @@ const AISettings: React.FC<AISettingsProps> = ({
 
           <section className="settings-form-section settings-model-parameters">
             <header>
-              <h4>生成与推理</h4>
-              <p>温度、会话上下文和思考模式模型。</p>
+              <h4>回答参数</h4>
+              <p>温度与最近消息数量；思考开关位于聊天界面，不需要配置第二个模型。</p>
             </header>
             <div className="settings-temperature-grid">
               <div className="settings-temperature-control">
@@ -179,17 +175,11 @@ const AISettings: React.FC<AISettingsProps> = ({
                 />
                 <small>每次发送给模型的最近消息条数，范围 1-100。</small>
               </div>
-              <div className="settings-form-group">
-                <label className="settings-form-label" htmlFor="think-model">思考模式模型</label>
-                <input
-                  id="think-model"
-                  type="text"
-                  value={chatModeSettings.thinkModel}
-                  onChange={(event) => onThinkModelChange(event.target.value)}
-                  placeholder="deepseek-r1:8b"
-                />
-                <small>留空时使用聊天模型。</small>
+              <div className="settings-form-group" role="note">
+                <strong className="settings-form-label">思考模式</strong>
+                <small>在聊天界面用一个开关控制，始终使用当前聊天模型；Embedding 不受影响。是否可用取决于模型与服务，不支持时会明确提示。</small>
               </div>
+
             </div>
           </section>
 

@@ -121,17 +121,35 @@ func NewLLMService() *LLMService {
 // ── Public methods ───────────────────────────────────────────────────────────
 
 func (s *LLMService) Chat(req model.ChatCompletionRequest) (model.ChatCompletionResponse, error) {
-	cfg, err := normalizeChatConfig(req)
-	if err != nil {
-		return model.ChatCompletionResponse{}, err
-	}
-
 	requestTimeout := defaultChatRequestTimeout
 	if req.Think != nil && *req.Think {
 		requestTimeout = defaultStreamRequestTimeout
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	defer cancel()
+	return s.ChatWithContext(ctx, req)
+}
+
+// ChatWithContext performs one non-streaming chat request with the caller's
+// context. It is used by bounded internal calls such as retrieval planning so
+// a short planner timeout can cancel the upstream HTTP request as well.
+func (s *LLMService) ChatWithContext(ctx context.Context, req model.ChatCompletionRequest) (model.ChatCompletionResponse, error) {
+	cfg, err := normalizeChatConfig(req)
+	if err != nil {
+		return model.ChatCompletionResponse{}, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		requestTimeout := defaultChatRequestTimeout
+		if req.Think != nil && *req.Think {
+			requestTimeout = defaultStreamRequestTimeout
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, requestTimeout)
+		defer cancel()
+	}
 
 	if cfg.Provider == "ollama" {
 		var result model.ChatCompletionResponse
@@ -646,6 +664,11 @@ func normalizeChatConfig(req model.ChatCompletionRequest) (model.ChatModelConfig
 	}
 	cfg.Provider = normalizedProvider
 	cfg.BaseURL = normalizedBaseURL
+	// Compatible chat APIs do not share a verified thinking-control contract.
+	// Never silently discard an explicit request to enable thinking.
+	if req.Think != nil && *req.Think && cfg.Provider != "ollama" {
+		return model.ChatModelConfig{}, fmt.Errorf("当前 OpenAI Compatible 接入尚未适配思考开关，请关闭该开关后继续使用当前聊天模型；不会切换其他模型")
+	}
 	if err := validateModelTemperature(cfg.Temperature); err != nil {
 		return model.ChatModelConfig{}, err
 	}

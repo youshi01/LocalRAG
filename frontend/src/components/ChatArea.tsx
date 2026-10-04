@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AppConfig,
   ChatMode,
-  ChatModeSettings,
   ChatContentMode,
   Conversation,
   DocumentItem,
@@ -21,7 +20,6 @@ interface ChatAreaProps {
   selectedDocument: DocumentItem | null
   config: AppConfig
   chatMode: ChatMode
-  chatModeSettings: ChatModeSettings
   isLoading: boolean
   isGlobalGenerating: boolean
   generatingConversationTitle: string
@@ -68,7 +66,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   selectedDocument,
   config,
   chatMode,
-  chatModeSettings,
   isLoading,
   isGlobalGenerating,
   generatingConversationTitle,
@@ -87,7 +84,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 }) => {
   const [inputValue, setInputValue] = useState('')
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
-  const [showModeMenu, setShowModeMenu] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [showExportDialog, setShowExportDialog] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -145,10 +141,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       ? `当前检索范围：知识库「${selectedKnowledgeBase.name}」的全部文档`
       : '当前检索范围：未选择'
 
-  const activeModeModel =
-    chatMode === 'think'
-      ? chatModeSettings.thinkModel || config.chat.model
-      : chatModeSettings.fastModel || config.chat.model
+  const activeChatModel = config.chat.model
 
   const handleSubmit = async () => {
     const content = inputValue.trim()
@@ -168,35 +161,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       event.preventDefault()
       await handleSubmit()
     }
-  }
-
-  const handleModeMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    const menuItems = Array.from(
-      event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'),
-    )
-
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      setShowModeMenu(false)
-      return
-    }
-
-    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) || menuItems.length === 0) {
-      return
-    }
-
-    event.preventDefault()
-    const activeIndex = Math.max(0, menuItems.indexOf(document.activeElement as HTMLButtonElement))
-    const nextIndex =
-      event.key === 'Home'
-        ? 0
-        : event.key === 'End'
-          ? menuItems.length - 1
-          : event.key === 'ArrowUp'
-            ? (activeIndex - 1 + menuItems.length) % menuItems.length
-            : (activeIndex + 1) % menuItems.length
-
-    menuItems[nextIndex]?.focus()
   }
 
   const handleCopyMessage = async (messageId: string, content: string) => {
@@ -256,10 +220,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             )}
             <span
               className="chat-model-status"
-              title={`${chatMode === 'think' ? '思考模式' : '快速模式'} · ${activeModeModel}`}
+              title={`${chatMode === 'think' ? '思考模式' : '普通回答'} · ${activeChatModel}`}
             >
               <ChatIcon name={chatMode === 'think' ? 'brain' : 'bolt'} />
-              <span>{activeModeModel}</span>
+              <span>{activeChatModel}</span>
             </span>
             {supportsFullTableMode && (
               <select
@@ -380,67 +344,22 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           {selectedDocument && (
             <span className="input-context-badge">文档</span>
           )}
+          <button
+            type="button"
+            className="chat-thinking-switch"
+            role="switch"
+            aria-label="思考模式"
+            aria-checked={chatMode === 'think'}
+            disabled={isGlobalGenerating}
+            onClick={() => onChatModeChange(chatMode === 'think' ? 'fast' : 'think')}
+            title={'思考模式' + (chatMode === 'think' ? '已开启' : '已关闭') + ' · 共用聊天模型 ' + activeChatModel + '；需要模型服务支持思考控制'}
+          >
+            <ChatIcon name="brain" />
+            <span>思考</span>
+            <span className="chat-thinking-switch-track" aria-hidden="true" />
+          </button>
         </div>
         <div className="input-container">
-          <div className="input-mode-compact">
-            <button
-              type="button"
-              className="input-mode-toggle"
-              onClick={() => setShowModeMenu((prev) => !prev)}
-              title={`${chatMode === 'think' ? '思考模式' : '快速模式'} · ${activeModeModel}`}
-              aria-label={`切换输入模式，当前为${chatMode === 'think' ? '思考模式' : '快速模式'}，模型 ${activeModeModel}`}
-              aria-controls="input-mode-menu"
-              aria-expanded={showModeMenu}
-              aria-haspopup="menu"
-            >
-              <ChatIcon name={chatMode === 'think' ? 'brain' : 'bolt'} />
-            </button>
-            {showModeMenu && (
-              <div
-                className="input-mode-dropdown"
-                id="input-mode-menu"
-                role="menu"
-                aria-label="输入模式选项"
-                onKeyDown={handleModeMenuKeyDown}
-              >
-                <button
-                  type="button"
-                  className={`input-mode-dropdown-item ${chatMode === 'fast' ? 'active' : ''}`}
-                  onClick={() => { onChatModeChange('fast'); setShowModeMenu(false) }}
-                  role="menuitemradio"
-                  aria-checked={chatMode === 'fast'}
-                  tabIndex={chatMode === 'fast' ? 0 : -1}
-                >
-                  <span className="input-mode-dropdown-icon">
-                    <ChatIcon name="bolt" />
-                  </span>
-                  <span className="input-mode-dropdown-label">
-                    <strong>快速模式</strong>
-                    <small>速度优先，日常问答</small>
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className={`input-mode-dropdown-item ${chatMode === 'think' ? 'active' : ''}`}
-                  onClick={() => { onChatModeChange('think'); setShowModeMenu(false) }}
-                  role="menuitemradio"
-                  aria-checked={chatMode === 'think'}
-                  tabIndex={chatMode === 'think' ? 0 : -1}
-                >
-                  <span className="input-mode-dropdown-icon">
-                    <ChatIcon name="brain" />
-                  </span>
-                  <span className="input-mode-dropdown-label">
-                    <strong>思考模式</strong>
-                    <small>质量优先，复杂分析</small>
-                  </span>
-                </button>
-                <div className="input-mode-dropdown-model" role="presentation">
-                  模型：{activeModeModel}
-                </div>
-              </div>
-            )}
-          </div>
           <textarea
             ref={textareaRef}
             value={inputValue}

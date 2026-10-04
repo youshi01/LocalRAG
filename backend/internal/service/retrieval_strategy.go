@@ -143,6 +143,27 @@ func (s *AppService) queryRewriteMaxVariantsForRequest(req model.ChatCompletionR
 	return cfg.QueryRewriteMaxVariants
 }
 
+func (s *AppService) modelRetrievalPlannerEnabledForRequest(req model.ChatCompletionRequest) bool {
+	if s == nil || s.retrievalPlanner == nil {
+		return false
+	}
+	return s.retrievalConfigForRequest(req).EnableModelRetrievalPlanner
+}
+
+func (s *AppService) modelRetrievalPlannerMaxRoundsForRequest(req model.ChatCompletionRequest) int {
+	if s == nil {
+		return 1
+	}
+	maxRounds := s.retrievalConfigForRequest(req).ModelRetrievalMaxRounds
+	if maxRounds < 1 {
+		return 1
+	}
+	if maxRounds > 2 {
+		return 2
+	}
+	return maxRounds
+}
+
 func (s *AppService) rerankStrategy() string {
 	return s.rerankStrategyForRequest(model.ChatCompletionRequest{})
 }
@@ -867,9 +888,10 @@ func keywordCoverage(query, text string) float64 {
 }
 
 const (
-	retrievalEvidenceCoverageThreshold  = 0.16
-	retrievalSemanticOnlyScoreThreshold = 0.78
-	retrievalSemanticScoreMargin        = 0.08
+	retrievalEvidenceCoverageThreshold       = 0.16
+	retrievalSemanticOnlyScoreThreshold      = 0.78
+	retrievalOpenEndedSemanticScoreThreshold = 0.45
+	retrievalSemanticScoreMargin             = 0.08
 	// 属性命中与问题限定词命中即可构成直接证据。实体名可能位于
 	// 上一段标题、相邻 Chunk 或文档元数据中，不能把实体重复出现作为硬要求。
 	retrievalFactEvidenceScoreThreshold = 4
@@ -896,7 +918,13 @@ func applyEvidenceGateWithStats(query string, chunks []RetrievedChunk) ([]Retrie
 	}
 
 	queryTerms := queryEvidenceTerms(query)
+	isOpenEnded := isOpenEndedKnowledgeQuery(query)
 	factSpecs := strictFactQuerySpecs(query)
+	if isOpenEnded {
+		// Open-ended summary/listing/advice questions should use semantic evidence
+		// rather than the strict single-attribute fact gate.
+		factSpecs = nil
+	}
 	if len(queryTerms) == 0 && len(factSpecs) == 0 {
 		return chunks, stats
 	}
@@ -944,7 +972,11 @@ func applyEvidenceGateWithStats(query string, chunks []RetrievedChunk) ([]Retrie
 		}
 	}
 
-	if !hasDirectEvidence && (isFactQuery || topRawScore < retrievalSemanticOnlyScoreThreshold) {
+	semanticOnlyThreshold := retrievalSemanticOnlyScoreThreshold
+	if isOpenEndedKnowledgeQuery(query) {
+		semanticOnlyThreshold = retrievalOpenEndedSemanticScoreThreshold
+	}
+	if !hasDirectEvidence && (isFactQuery || topRawScore < semanticOnlyThreshold) {
 		stats.OutputCount = 0
 		stats.DroppedCount = stats.InputCount
 		return nil, stats
@@ -953,7 +985,7 @@ func applyEvidenceGateWithStats(query string, chunks []RetrievedChunk) ([]Retrie
 	kept := make([]RetrievedChunk, 0, len(decisions))
 	for _, decision := range decisions {
 		if decision.direct ||
-			(!isFactQuery && !hasDirectEvidence && decision.rawScore >= topRawScore-retrievalSemanticScoreMargin && decision.rawScore >= retrievalSemanticOnlyScoreThreshold) {
+			(!isFactQuery && !hasDirectEvidence && decision.rawScore >= topRawScore-retrievalSemanticScoreMargin && decision.rawScore >= semanticOnlyThreshold) {
 			kept = append(kept, decision.chunk)
 		}
 	}
@@ -1355,6 +1387,35 @@ func evidenceHitCount(terms []string, text string) int {
 	return hits
 }
 
+func isOpenEndedKnowledgeQuery(query string) bool {
+	normalized := strings.TrimSpace(strings.ToLower(query))
+	if normalized == "" {
+		return false
+	}
+
+	markers := []string{
+		"总结", "概括", "核心观点", "主要观点", "主要内容", "具体内容", "详细内容",
+		"关键结论", "重点结论", "主要结论", "关键发现", "重点发现", "重要结论",
+		"讲了什么", "介绍", "说明", "概述", "内容有哪些", "有什么内容", "全文", "原文",
+		"列出", "梳理",
+		"下一步", "后续步骤", "实施步骤", "下一阶段", "后续工作", "后续安排",
+		"下一步建议", "后续建议", "实现建议", "实施建议", "开发建议", "优化建议",
+		"改进建议", "方案建议", "落地建议", "推进建议", "建议是什么",
+		"开始实现", "如何实现", "怎么实现", "怎样实现", "实现路径", "实施路径",
+		"实现方案", "实施方案", "优先做", "优先", "重点做", "重点工作", "工作安排",
+		"先做什么", "应该做什么", "哪些工作", "怎么做", "推进",
+		"推荐", "建议", "规划", "实施", "落地",
+	}
+	for _, marker := range markers {
+		if strings.Contains(normalized, marker) {
+			// Summary/listing language takes precedence over the generic
+			// “subject 的 attribute” parser. A request such as “列出关键结论”
+			// must not be reduced to a strict single-field lookup.
+			return true
+		}
+	}
+	return false
+}
 func queryEvidenceTerms(query string) []string {
 	normalized := strings.TrimSpace(strings.ToLower(query))
 	if normalized == "" {

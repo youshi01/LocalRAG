@@ -167,3 +167,22 @@ func TestAssessCitationSupportMarksAbstentionAndScopesSources(t *testing.T) {
 		t.Fatalf("expected out-of-scope source to be rejected, got %+v", report)
 	}
 }
+
+func TestAssessCitationSupportTreatsChineseInsufficientEvidenceAsAbstention(t *testing.T) {
+	report := AssessCitationSupport(
+		"请列出知识库中最关键的结论",
+		"资料不足。当前知识库没有提供具体文档内容，因此无法列出关键结论。",
+		[]map[string]string{{
+			"knowledgeBaseId": "kb-1",
+			"documentId":      "doc-1",
+			"documentName":    "说明.md",
+			"chunkId":         "chunk-1",
+			"snippet":         "说明文档内容。",
+		}},
+		"kb-1",
+		"",
+	)
+	if report.Status != "abstained" || report.ClaimCount != 0 || len(report.SupportedSources) != 0 {
+		t.Fatalf("expected Chinese insufficient-evidence answer to be abstained, got %+v", report)
+	}
+}

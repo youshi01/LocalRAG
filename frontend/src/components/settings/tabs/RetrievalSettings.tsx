@@ -1,6 +1,8 @@
 import React, { useMemo } from 'react'
 import type { RetrievalConfig } from '../../../App'
 import AppIcon, { type AppIconName } from '../../common/AppIcon'
+import RetrievalHelp from '../RetrievalHelpPopover'
+import { retrievalHelpSections } from '../retrievalHelp'
 
 interface RetrievalSettingsProps {
   config: RetrievalConfig
@@ -33,6 +35,8 @@ const retrievalPresets: RetrievalPreset[] = [
       rerankStrategy: 'keyword',
       enableQueryRewrite: false,
       queryRewriteMaxVariants: 2,
+      enableModelRetrievalPlanner: false,
+      modelRetrievalMaxRounds: 1,
       topKDocument: 4,
       candidateTopKDocument: 8,
       topKKnowledgeBase: 6,
@@ -53,6 +57,8 @@ const retrievalPresets: RetrievalPreset[] = [
       rerankStrategy: 'keyword',
       enableQueryRewrite: true,
       queryRewriteMaxVariants: 3,
+      enableModelRetrievalPlanner: true,
+      modelRetrievalMaxRounds: 2,
       topKDocument: 8,
       candidateTopKDocument: 20,
       topKKnowledgeBase: 12,
@@ -73,6 +79,8 @@ const retrievalPresets: RetrievalPreset[] = [
       rerankStrategy: 'semantic',
       enableQueryRewrite: true,
       queryRewriteMaxVariants: 4,
+      enableModelRetrievalPlanner: true,
+      modelRetrievalMaxRounds: 2,
       topKDocument: 10,
       candidateTopKDocument: 30,
       topKKnowledgeBase: 16,
@@ -116,12 +124,15 @@ const RetrievalSettings: React.FC<RetrievalSettingsProps> = ({
   return (
     <div className="settings-tab-content settings-retrieval-page">
       <section className="settings-preset-section">
-        <header>
-          <div>
+        <header className="settings-section-header">
+          <div className="settings-section-heading">
             <h3>检索预设</h3>
             <p>选择预设后仍可直接微调下方全部参数。</p>
           </div>
-          {activePreset === 'custom' && <span className="settings-preset-current">当前为自定义配置</span>}
+          <div className="settings-section-header-actions">
+            {activePreset === 'custom' && <span className="settings-preset-current">当前为自定义配置</span>}
+            <RetrievalHelp section={retrievalHelpSections.preset} />
+          </div>
         </header>
         <div className="settings-preset-options" aria-label="检索预设">
           {retrievalPresets.map((preset) => (
@@ -142,9 +153,12 @@ const RetrievalSettings: React.FC<RetrievalSettingsProps> = ({
       </section>
 
       <section className="settings-form-section settings-retrieval-core">
-        <header>
-          <h4>核心策略</h4>
-          <p>决定召回方式、排序方法和回答证据长度。默认已适当放宽，适合知识库和表格问答。</p>
+        <header className="settings-section-header">
+          <div className="settings-section-heading">
+            <h4>核心策略</h4>
+            <p>决定召回方式、排序方法和回答证据长度。默认已适当放宽，适合知识库和表格问答。</p>
+          </div>
+          <RetrievalHelp section={retrievalHelpSections.strategy} />
         </header>
         <div className="settings-form-grid settings-form-grid-dense">
           <div className="settings-form-group">
@@ -201,9 +215,12 @@ const RetrievalSettings: React.FC<RetrievalSettingsProps> = ({
       </section>
 
       <section className="settings-form-section settings-retrieval-detail">
-        <header>
-          <h4>查询增强</h4>
-          <p>为模糊问题生成多个检索表达。</p>
+        <header className="settings-section-header">
+          <div className="settings-section-heading">
+            <h4>查询增强</h4>
+            <p>为模糊问题生成多个检索表达。</p>
+          </div>
+          <RetrievalHelp section={retrievalHelpSections.enhancement} />
         </header>
         <div className="settings-form-grid settings-form-grid-dense">
           <label className="settings-toggle-row settings-form-group-full" htmlFor="retrieval-query-rewrite">
@@ -218,6 +235,31 @@ const RetrievalSettings: React.FC<RetrievalSettingsProps> = ({
               onChange={(event) => onRetrievalConfigChange('enableQueryRewrite', event.target.checked)}
             />
           </label>
+          <label className="settings-toggle-row settings-form-group-full" htmlFor="retrieval-model-planner">
+            <span>
+              <strong>启用模型辅助检索</strong>
+              <small>模型先判断问题是否需要知识库，并生成检索表达；模型不可用时自动回退原有检索。</small>
+            </span>
+            <input
+              id="retrieval-model-planner"
+              type="checkbox"
+              checked={config.enableModelRetrievalPlanner}
+              onChange={(event) => onRetrievalConfigChange('enableModelRetrievalPlanner', event.target.checked)}
+            />
+          </label>
+          <div className="settings-form-group">
+            <label className="settings-form-label" htmlFor="retrieval-model-planner-rounds">最大规划轮数</label>
+            <input
+              disabled={!config.enableModelRetrievalPlanner}
+              id="retrieval-model-planner-rounds"
+              type="number"
+              min="1"
+              max="2"
+              value={config.modelRetrievalMaxRounds}
+              onChange={(event) => onRetrievalConfigChange('modelRetrievalMaxRounds', Number(event.target.value))}
+            />
+            <small>默认 2 轮：首轮检索证据不足时最多补检索 1 次。</small>
+          </div>
           <div className="settings-form-group">
             <label className="settings-form-label" htmlFor="retrieval-query-variants">改写数量</label>
             <input
@@ -234,9 +276,12 @@ const RetrievalSettings: React.FC<RetrievalSettingsProps> = ({
       </section>
 
       <section className="settings-form-section settings-retrieval-detail">
-        <header>
-          <h4>召回规模</h4>
-          <p>控制初始候选和最终进入上下文的片段数量。数值越大，证据更完整，但耗时和模型上下文消耗也会增加。</p>
+        <header className="settings-section-header">
+          <div className="settings-section-heading">
+            <h4>召回规模</h4>
+            <p>控制初始候选和最终进入上下文的片段数量。数值越大，证据更完整，但耗时和模型上下文消耗也会增加。</p>
+          </div>
+          <RetrievalHelp section={retrievalHelpSections.scale} />
         </header>
         <div className="settings-form-grid settings-form-grid-dense">
           <div className="settings-form-group">

@@ -566,7 +566,8 @@ func isEvidenceAbstention(answer string) bool {
 		return true
 	}
 	for _, phrase := range []string{
-		"无法确认", "无法确定", "无法回答", "没有足够信息", "缺少足够信息", "未找到可靠证据", "未找到相关证据", "暂无可靠证据",
+		"资料不足", "信息不足", "当前知识库没有提供", "当前知识库仅显示", "未提供具体内容", "没有具体内容",
+		"无法确认", "无法确定", "无法回答", "无法列出", "没有足够信息", "缺少足够信息", "未找到可靠证据", "未找到相关证据", "暂无可靠证据",
 		"cannot determine", "cannot answer", "no reliable evidence",
 	} {
 		if strings.Contains(normalized, phrase) {

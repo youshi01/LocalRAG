@@ -528,6 +528,49 @@ func TestApplyEvidenceGateAllowsStrongSemanticOnlyMatch(t *testing.T) {
 	}
 }
 
+func TestApplyEvidenceGateKeepsModerateSemanticEvidenceForOpenEndedDocumentQueries(t *testing.T) {
+	queries := []string{
+		"请总结文档的核心观点",
+		"里面具体内容有吗？",
+		"这个文档讲了什么",
+		"请列出这个知识库中最关键的结论",
+		"如果基于当前资料开始实现，下一步建议是什么？",
+		"基于当前资料，后续实施步骤怎么安排？",
+	}
+	for _, query := range queries {
+		t.Run(query, func(t *testing.T) {
+			filtered, stats := applyEvidenceGateWithStats(query, []RetrievedChunk{{
+				DocumentChunk: DocumentChunk{
+					DocumentID: "doc-pdf",
+					Text:       "文档包含系统名称清单、未备案资产说明和资产测绘平台搜索建议。",
+				},
+				Score:    0.58,
+				RawScore: 0.56,
+			}})
+			if len(filtered) != 1 || filtered[0].DocumentID != "doc-pdf" || stats.OutputCount != 1 {
+				t.Fatalf("expected moderate semantic evidence for open-ended query, filtered=%#v stats=%#v", filtered, stats)
+			}
+		})
+	}
+}
+func TestIsOpenEndedKnowledgeQueryRecognizesConclusionListing(t *testing.T) {
+	queries := []string{
+		"请列出这个知识库中最关键的结论",
+		"请概括知识库里的重点结论",
+		"这个知识库有哪些关键发现",
+		"如果基于当前资料开始实现，下一步建议是什么？",
+		"基于当前资料，后续实施步骤怎么安排？",
+		"根据这份资料，优先应该做哪些工作？",
+	}
+	for _, query := range queries {
+		t.Run(query, func(t *testing.T) {
+			if !isOpenEndedKnowledgeQuery(query) {
+				t.Fatalf("expected open-ended knowledge query, got %q", query)
+			}
+		})
+	}
+}
+
 func TestApplyEvidenceGateKeepsDeterministicStructuredResults(t *testing.T) {
 	chunks := []RetrievedChunk{{
 		DocumentChunk: DocumentChunk{
@@ -1002,6 +1045,112 @@ func TestBuildChatContextIncludesDocumentPreviews(t *testing.T) {
 	}
 	if !strings.Contains(context, "API 服务") || !strings.Contains(context, "系统指南.md") {
 		t.Fatalf("expected document preview in knowledge-base context, got %q", context)
+	}
+}
+
+func TestBuildChatContextUsesIndexedContentForOpenEndedDocumentWhenRetrievalHasNoSources(t *testing.T) {
+	document := model.Document{
+		ID:              "doc-asset",
+		KnowledgeBaseID: "kb-guide",
+		Name:            "资产关键字提取.pdf",
+		IndexFence:      "fence-asset",
+		ContentPreview:  "文档摘要只列出了分析范围和系统名称总数。",
+	}
+	store := NewIndexedContentStore(t.TempDir())
+	indexedContent := "资产关键字提取\n互联网暴露面排查关键字\n下一步可先按系统功能关键词建立资产清单，再核查备案和访问控制。"
+	if err := store.Put(document, indexedContent, nil); err != nil {
+		t.Fatalf("put indexed content: %v", err)
+	}
+	service := &AppService{
+		state: &model.AppState{KnowledgeBases: map[string]model.KnowledgeBase{
+			"kb-guide": {
+				ID:        "kb-guide",
+				Name:      "项目资料",
+				Documents: []model.Document{document},
+			},
+		}},
+		indexedContentStore: store,
+		rag:                 NewRagService(),
+		serverConfig:        model.ServerConfig{RetrievalMaxContextChars: 8000},
+	}
+
+	context, sources, err := service.BuildChatContext(model.ChatCompletionRequest{
+		KnowledgeBaseID: "kb-guide",
+		DocumentID:      "doc-asset",
+		Messages: []model.ChatMessage{{
+			Role:    "user",
+			Content: "如果基于当前资料开始实现，下一步建议是什么？",
+		}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("build indexed fallback context: %v", err)
+	}
+	if !strings.Contains(context, "下一步可先按系统功能关键词建立资产清单") {
+		t.Fatalf("expected indexed content instead of summary-only fallback, got %q", context)
+	}
+	if len(sources) != 1 || sources[0]["chunkKind"] != "indexed_content_fallback" {
+		t.Fatalf("expected indexed fallback citation source, got %#v", sources)
+	}
+}
+
+func TestBuildChatContextUsesIndexedContentForOpenEndedKnowledgeBaseWhenRetrievalHasNoSources(t *testing.T) {
+	documents := []model.Document{
+		{ID: "doc-guide", KnowledgeBaseID: "kb-guide", Name: "系统指南.md", ContentPreview: "系统指南摘要。", IndexFence: "fence-guide"},
+		{ID: "doc-runbook", KnowledgeBaseID: "kb-guide", Name: "运行手册.md", ContentPreview: "运行手册摘要。", IndexFence: "fence-runbook"},
+	}
+	store := NewIndexedContentStore(t.TempDir())
+	if err := store.Put(documents[0], "系统指南全文：先完成 API 服务和向量存储配置。", nil); err != nil {
+		t.Fatalf("put guide indexed content: %v", err)
+	}
+	if err := store.Put(documents[1], "运行手册全文：然后完成部署、健康检查和故障排查验证。", nil); err != nil {
+		t.Fatalf("put runbook indexed content: %v", err)
+	}
+	service := &AppService{
+		state: &model.AppState{KnowledgeBases: map[string]model.KnowledgeBase{
+			"kb-guide": {ID: "kb-guide", Name: "项目资料", Documents: documents},
+		}},
+		indexedContentStore: store,
+		serverConfig:        model.ServerConfig{RetrievalMaxContextChars: 8000},
+	}
+
+	context, sources, err := service.BuildChatContext(model.ChatCompletionRequest{
+		KnowledgeBaseID: "kb-guide",
+		Messages:        []model.ChatMessage{{Role: "user", Content: "基于当前资料，下一步应该做哪些工作？"}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("build knowledge-base indexed fallback context: %v", err)
+	}
+	for _, expected := range []string{"API 服务和向量存储配置", "部署、健康检查和故障排查验证"} {
+		if !strings.Contains(context, expected) {
+			t.Fatalf("expected indexed knowledge-base content %q, got %q", expected, context)
+		}
+	}
+	if len(sources) != 2 || sources[0]["chunkKind"] != "indexed_content_fallback" || sources[1]["chunkKind"] != "indexed_content_fallback" {
+		t.Fatalf("expected indexed fallback citation sources, got %#v", sources)
+	}
+}
+
+func TestBuildChatContextFallsBackToAllDocumentPreviewsWhenRetrievalHasNoSources(t *testing.T) {
+	service := &AppService{state: &model.AppState{KnowledgeBases: map[string]model.KnowledgeBase{
+		"kb-guide": {
+			ID:   "kb-guide",
+			Name: "项目资料",
+			Documents: []model.Document{
+				{ID: "doc-guide", Name: "系统指南.md", ContentPreview: "系统指南包含 API 服务和向量存储。"},
+				{ID: "doc-runbook", Name: "运行手册.md", ContentPreview: "运行手册包含部署和故障排查步骤。"},
+			},
+		},
+	}}}
+
+	context, sources, err := service.BuildChatContext(model.ChatCompletionRequest{KnowledgeBaseID: "kb-guide"}, nil)
+	if err != nil {
+		t.Fatalf("build fallback chat context: %v", err)
+	}
+	if !strings.Contains(context, "系统指南包含 API 服务") || !strings.Contains(context, "运行手册包含部署") {
+		t.Fatalf("expected all document previews in fallback context, got %q", context)
+	}
+	if len(sources) != 2 || sources[0]["chunkId"] == "" || sources[0]["snippet"] == "" {
+		t.Fatalf("expected complete preview citation sources, got %#v", sources)
 	}
 }
 

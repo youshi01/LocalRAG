@@ -12,6 +12,8 @@ export const defaultRetrievalConfig: RetrievalConfig = {
   rerankStrategy: 'keyword',
   enableQueryRewrite: false,
   queryRewriteMaxVariants: 3,
+  enableModelRetrievalPlanner: true,
+  modelRetrievalMaxRounds: 2,
   topKDocument: 8,
   candidateTopKDocument: 20,
   topKKnowledgeBase: 12,
@@ -117,6 +119,13 @@ export const normalizeAppConfig = (config: Partial<AppConfig>, fallback: AppConf
       hybridSearchEnabled: Boolean(retrieval.hybridSearchEnabled),
       rerankStrategy: retrieval.rerankStrategy === 'semantic' ? 'semantic' : 'keyword',
       enableQueryRewrite: Boolean(retrieval.enableQueryRewrite),
+      enableModelRetrievalPlanner: Boolean(retrieval.enableModelRetrievalPlanner),
+      modelRetrievalMaxRounds: clampNumber(
+        retrieval.modelRetrievalMaxRounds,
+        fallback.retrieval.modelRetrievalMaxRounds,
+        1,
+        2,
+      ),
       queryRewriteMaxVariants: clampNumber(
         retrieval.queryRewriteMaxVariants,
         fallback.retrieval.queryRewriteMaxVariants,

@@ -531,6 +531,10 @@
   font-weight: 600;
 }
 
+.message-citation-score {
+  cursor: help;
+  border-bottom-style: dotted;
+}
 .message-citation-head button {
   flex-shrink: 0;
   padding: 3px 10px;
@@ -1254,4 +1258,48 @@
   .topbar-badge {
     max-width: 120px;
   }
+}
+
+/* One thinking control in the composer toolbar; it never selects a second model. */
+.chat-thinking-switch {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 7px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full, 999px);
+  background: var(--surface-primary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.chat-thinking-switch > svg { width: 14px; height: 14px; }
+.chat-thinking-switch[aria-checked="true"] { color: var(--color-primary); border-color: var(--color-primary); }
+.chat-thinking-switch:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+.chat-thinking-switch:disabled { opacity: 0.55; cursor: not-allowed; }
+.chat-thinking-switch-track {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--border-color);
+}
+.chat-thinking-switch-track::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  top: 2px;
+  left: 2px;
+  border-radius: 50%;
+  background: var(--surface-primary);
+  transition: transform 0.15s ease;
+}
+.chat-thinking-switch[aria-checked="true"] .chat-thinking-switch-track { background: var(--color-primary); }
+.chat-thinking-switch[aria-checked="true"] .chat-thinking-switch-track::after { transform: translateX(12px); }
+@media (prefers-reduced-motion: reduce) {
+  .chat-thinking-switch-track::after { transition: none; }
 }

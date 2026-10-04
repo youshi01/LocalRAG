@@ -179,9 +179,69 @@ func (o *RetrievalOrchestrator) evaluateRaw(ctx context.Context, req model.ChatC
 		return nil, nil
 	}
 
+	plannerEnabled := service.modelRetrievalPlannerEnabledForRequest(req)
+	plannerUsed := false
+	plannerQueries := []string(nil)
+	plannerInput := RetrievalPlanInput{
+		Query:               query,
+		ChatConfig:          service.resolveChatConfig(req),
+		ConversationHistory: recentConversationHistory(req.Messages, 3),
+		KnowledgeBaseID:     strings.TrimSpace(req.KnowledgeBaseID),
+		DocumentID:          strings.TrimSpace(req.DocumentID),
+		Round:               1,
+	}
+	if plannerEnabled {
+		knowledgeBaseIDs, resolveErr := service.resolveRetrievalKnowledgeBaseIDs(req)
+		if resolveErr != nil {
+			logRetrievalStageMetrics(req, query, "model_retrieval_planner", time.Now(), map[string]any{
+				"status":   "fallback",
+				"fallback": true,
+				"error":    resolveErr.Error(),
+			})
+		} else {
+			plannerInput.KnowledgeBaseID = strings.Join(knowledgeBaseIDs, ",")
+			planStartedAt := time.Now()
+			plan, planErr := service.retrievalPlanner.Plan(ctx, plannerInput)
+			if planErr != nil {
+				logRetrievalStageMetrics(req, query, "model_retrieval_planner", planStartedAt, map[string]any{
+					"status":   "fallback",
+					"fallback": true,
+					"error":    planErr.Error(),
+				})
+			} else if !plan.NeedKnowledge {
+				logRetrievalStageMetrics(req, query, "model_retrieval_planner", planStartedAt, map[string]any{
+					"status":         "skipped",
+					"need_knowledge": false,
+					"round":          1,
+				})
+				logRetrievalStageMetrics(req, query, "evaluate_retrieve_total", startedAt, map[string]any{
+					"status":          "skipped",
+					"selected_chunks": 0,
+					"reason":          "model_planner_not_needed",
+				})
+				return nil, nil
+			} else if len(plan.Queries) == 0 {
+				logRetrievalStageMetrics(req, query, "model_retrieval_planner", planStartedAt, map[string]any{
+					"status":   "fallback",
+					"fallback": true,
+					"error":    "planner returned no retrieval queries",
+				})
+			} else {
+				plannerUsed = true
+				plannerQueries = append([]string(nil), plan.Queries...)
+				logRetrievalStageMetrics(req, query, "model_retrieval_planner", planStartedAt, map[string]any{
+					"status":         "ok",
+					"need_knowledge": true,
+					"round":          1,
+					"queries":        len(plannerQueries),
+				})
+			}
+		}
+	}
+
 	var queryVector []float64
 	embeddingStartedAt := time.Now()
-	if !service.queryRewriteEnabledForRequest(req) {
+	if !plannerUsed && !service.queryRewriteEnabledForRequest(req) {
 		embedCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 		defer cancel()
 		vectors, err := service.rag.EmbedTexts(embedCtx, service.resolveEmbeddingConfig(req), []string{query}, service.qdrantVectorSize())
@@ -205,19 +265,117 @@ func (o *RetrievalOrchestrator) evaluateRaw(ctx context.Context, req model.ChatC
 	} else {
 		logRetrievalStageMetrics(req, query, "query_embedding", embeddingStartedAt, map[string]any{
 			"status":        "skipped",
-			"used_rewriter": true,
+			"used_rewriter": service.queryRewriteEnabledForRequest(req),
+			"used_planner":  plannerUsed,
 		})
 	}
 
-	chunks, err := service.retrieveRelevantChunksWithContext(ctx, req, queryVector)
+	chunks, err := service.retrieveRelevantChunksWithQueries(ctx, req, queryVector, plannerQueries)
 	logRetrievalStageMetrics(req, query, "evaluate_retrieve_total", startedAt, map[string]any{
 		"status":          retrievalStatus(err),
 		"selected_chunks": len(chunks),
+		"planner_used":    plannerUsed,
 	})
 	if err != nil {
 		return nil, err
 	}
+
+	if plannerUsed && service.modelRetrievalPlannerMaxRoundsForRequest(req) > 1 && needsPlannerFollowUp(query, chunks) {
+		plannerInput.Round = 2
+		plannerInput.PreviousQueries = append([]string(nil), plannerQueries...)
+		plannerInput.EvidenceSummary = retrievalEvidenceSummary(chunks)
+		followupStartedAt := time.Now()
+		followupPlan, planErr := service.retrievalPlanner.Plan(ctx, plannerInput)
+		if planErr != nil {
+			logRetrievalStageMetrics(req, query, "model_retrieval_follow_up", followupStartedAt, map[string]any{
+				"status":   "fallback",
+				"fallback": true,
+				"round":    2,
+				"error":    planErr.Error(),
+			})
+		} else if followupPlan.NeedKnowledge && len(followupPlan.Queries) > 0 {
+			followupChunks, retrieveErr := service.retrieveRelevantChunksWithQueries(ctx, req, nil, followupPlan.Queries)
+			if retrieveErr != nil {
+				logRetrievalStageMetrics(req, query, "model_retrieval_follow_up", followupStartedAt, map[string]any{
+					"status": "error",
+					"round":  2,
+					"error":  retrieveErr.Error(),
+				})
+			} else {
+				combined := mergeRetrievedChunksForPlanner(append(append([]RetrievedChunk(nil), chunks...), followupChunks...))
+				chunks = service.applySelectionStrategy(req, query, ctx, combined, service.resolveRetrievalParams(req))
+				logRetrievalStageMetrics(req, query, "model_retrieval_follow_up", followupStartedAt, map[string]any{
+					"status":          "ok",
+					"round":           2,
+					"queries":         len(followupPlan.Queries),
+					"selected_chunks": len(chunks),
+				})
+			}
+		} else {
+			logRetrievalStageMetrics(req, query, "model_retrieval_follow_up", followupStartedAt, map[string]any{
+				"status": "skipped",
+				"round":  2,
+			})
+		}
+	}
 	return chunks, nil
+
+}
+
+func needsPlannerFollowUp(query string, chunks []RetrievedChunk) bool {
+	if isLowConfidenceSelection(query, chunks) {
+		return true
+	}
+	filtered, stats := applyEvidenceGateWithStats(query, chunks)
+	return len(filtered) == 0 || stats.OutputCount == 0
+}
+
+func retrievalEvidenceSummary(chunks []RetrievedChunk) string {
+	if len(chunks) == 0 {
+		return "首轮没有返回证据片段。"
+	}
+	var builder strings.Builder
+	for index, chunk := range chunks {
+		if index >= 5 {
+			break
+		}
+		text := truncateRunes(strings.TrimSpace(chunk.Text), 480)
+		if text == "" {
+			continue
+		}
+		fmt.Fprintf(&builder, "片段%d score=%.4f 文档=%s：%s\n", index+1, chunk.Score, chunk.DocumentName, text)
+	}
+	if builder.Len() == 0 {
+		return "首轮返回了片段，但没有可摘要文本。"
+	}
+	return builder.String()
+}
+
+func mergeRetrievedChunksForPlanner(chunks []RetrievedChunk) []RetrievedChunk {
+	if len(chunks) == 0 {
+		return nil
+	}
+	byID := make(map[string]RetrievedChunk, len(chunks))
+	order := make([]string, 0, len(chunks))
+	for _, chunk := range chunks {
+		key := strings.TrimSpace(chunk.ID)
+		if key == "" {
+			key = fmt.Sprintf("%s|%s|%d", chunk.DocumentID, chunk.DocumentName, chunk.Index)
+		}
+		if existing, ok := byID[key]; ok {
+			if chunk.Score > existing.Score {
+				byID[key] = chunk
+			}
+			continue
+		}
+		byID[key] = chunk
+		order = append(order, key)
+	}
+	merged := make([]RetrievedChunk, 0, len(order))
+	for _, key := range order {
+		merged = append(merged, byID[key])
+	}
+	return merged
 }
 
 func (o *RetrievalOrchestrator) Debug(ctx context.Context, req model.RetrievalDebugRequest) (model.RetrievalDebugResponse, error) {

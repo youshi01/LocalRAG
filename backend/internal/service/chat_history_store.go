@@ -408,3 +408,31 @@ func sortConversationItems(items []model.ConversationListItem) {
 		return items[i].UpdatedAt > items[j].UpdatedAt
 	})
 }
+
+// DeleteAllConversations clears only chat tables. All deletes and the returned
+// count belong to one transaction; an error leaves both tables unchanged.
+func (s *SQLiteChatHistoryStore) DeleteAllConversations() (int, error) {
+	if s == nil || s.db == nil {
+		return 0, fmt.Errorf("sqlite chat history store is nil")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("begin conversation clear: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec("DELETE FROM messages"); err != nil {
+		return 0, fmt.Errorf("clear conversation messages: %w", err)
+	}
+	result, err := tx.Exec("DELETE FROM conversations")
+	if err != nil {
+		return 0, fmt.Errorf("clear conversations: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("count cleared conversations: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit conversation clear: %w", err)
+	}
+	return int(count), nil
+}

@@ -1,6 +1,8 @@
 import './App.css'
 import { createEmptyConversation, createId, normalizeChatMetadata } from './app/appHelpers'
 import { createDefaultAppConfig, normalizeAppConfig } from './app/appConfig'
+import { getClearAllConversationState, loadCurrentConversationData } from './app/conversationReset'
+import ClearAllConversationsDialog from './components/chat/ClearAllConversationsDialog'
 import { buildChatRequestBody } from './chat/chatRequest'
 import ChatArea from './components/ChatArea'
 import Sidebar from './components/Sidebar'
@@ -410,7 +412,14 @@ function AppContent() {
     setCitationNavigationTarget,
     streamingConversationId,
     setStreamingConversationId,
+    conversationOperationGuard,
+    conversationResetKey,
+    isClearingConversations,
+    isConversationMutating,
+    runConversationMutation,
+    clearConversations,
   } = useConversationWorkspaceState(createEmptyConversation)
+  const [showClearAllConfirm, setShowClearAllConfirm] = useState(false)
   const [directoryUploadTask, setDirectoryUploadTask] = useState<DirectoryUploadTask>(
     createEmptyDirectoryUploadTask,
   )
@@ -439,6 +448,7 @@ function AppContent() {
     setActiveConversationId,
     setSelectedKnowledgeBaseId,
     setSelectedDocumentId,
+    conversationOperationGuard,
   })
 
   const supportsFullTableMode = Boolean(
@@ -510,6 +520,12 @@ function AppContent() {
     window.localStorage.removeItem('ai-localbase-config')
   }, [])
 
+  const clearAllState = getClearAllConversationState(conversations, {
+    isGenerating: Boolean(streamingConversationId),
+    isClearing: isClearingConversations,
+    isMutating: isConversationMutating,
+  })
+
   const isOllamaSingleFlightMode =
     config.chat.provider === 'ollama' || config.embedding.provider === 'ollama'
 
@@ -548,6 +564,7 @@ function AppContent() {
   }
 
   const activateConversationScope = (knowledgeBaseId: string, documentId: string) => {
+    if (!conversationOperationGuard.isCurrent(conversationResetKey)) return
     if (!ensureNoActiveGeneration('切换知识库范围')) {
       return
     }
@@ -573,6 +590,7 @@ function AppContent() {
   }
 
   const handleCreateConversation = () => {
+    if (!conversationOperationGuard.isCurrent(conversationResetKey)) return
     const conversation = createEmptyConversation(
       selectedKnowledgeBaseId ?? '',
       selectedDocumentId ?? '',
@@ -583,7 +601,9 @@ function AppContent() {
   }
 
   const handleSelectConversation = async (conversationId: string) => {
+    if (!conversationOperationGuard.isCurrent(conversationResetKey)) return
     const existingConversation = conversations.find((conversation) => conversation.id === conversationId)
+    if (!existingConversation) return
     if (
       existingConversation?.localOnly ||
       (existingConversation && existingConversation.messages.length > 0)
@@ -595,7 +615,11 @@ function AppContent() {
     }
 
     try {
-      const loadedConversation = await fetchConversationDetail(conversationId)
+      const loadedConversation = await loadCurrentConversationData(
+        conversationOperationGuard,
+        () => fetchConversationDetail(conversationId),
+      )
+      if (!loadedConversation || !conversationOperationGuard.isCurrent(conversationResetKey)) return
       setConversations((prev) =>
         prev.map((conversation) =>
           conversation.id === conversationId ? loadedConversation : conversation,
@@ -611,7 +635,31 @@ function AppContent() {
     }
   }
 
-  const handleRenameConversation = async (conversationId: string, title: string) => {
+  const handleRequestClearAllConversations = () => {
+    if (clearAllState.canClear && conversationOperationGuard.isCurrent(conversationResetKey)) {
+      setShowClearAllConfirm(true)
+    }
+  }
+
+  const handleClearAllConversations = async () => {
+    if (!clearAllState.canClear || !conversationOperationGuard.isCurrent(conversationResetKey)) return
+    try {
+      const result = await clearConversations(
+        selectedKnowledgeBaseId ?? '',
+        selectedDocumentId ?? '',
+      )
+      if (!result) return
+      activeChatRequestRef.current = null
+      chatAbortControllerRef.current = null
+      setShowClearAllConfirm(false)
+      showToast('success', '已清空本项目全部会话及消息（服务端删除 ' + result.deletedCount + ' 个会话），已新建空白会话。', 5000)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '请稍后重试。'
+      showToast('error', '清空本项目全部会话失败：' + message, 6000)
+    }
+  }
+
+  const handleRenameConversation = async (conversationId: string, title: string) => runConversationMutation(async () => {
     const nextTitle = title.trim()
     if (!nextTitle) {
       return
@@ -660,9 +708,9 @@ function AppContent() {
         error instanceof Error ? error.message : '重命名会话失败，请稍后重试。'
       window.alert(`重命名会话失败：${message}`)
     }
-  }
+  }, undefined)
 
-  const handleDeleteConversation = async (conversationId: string) => {
+  const handleDeleteConversation = async (conversationId: string) => runConversationMutation(async () => {
     const targetConversation = conversations.find((conversation) => conversation.id === conversationId)
     if (!targetConversation) {
       return
@@ -702,9 +750,9 @@ function AppContent() {
         error instanceof Error ? error.message : '删除会话失败，请稍后重试。'
       window.alert(`删除会话失败：${message}`)
     }
-  }
+  }, undefined)
 
-  const handleClearConversation = async () => {
+  const handleClearConversation = async () => runConversationMutation(async () => {
     if (!activeConversation) {
       return
     }
@@ -732,9 +780,9 @@ function AppContent() {
       const message = error instanceof Error ? error.message : '清空会话失败，请稍后重试。'
       window.alert(`清空会话失败：${message}`)
     }
-  }
+  }, undefined)
 
-  const handleEditMessage = async (messageId: string, newContent: string) => {
+  const handleEditMessage = async (messageId: string, newContent: string) => runConversationMutation(async () => {
     if (!activeConversation || !ensureNoActiveGeneration('编辑消息')) {
       return
     }
@@ -751,9 +799,9 @@ function AppContent() {
         error instanceof Error ? error.message : '编辑消息失败，请稍后重试。'
       window.alert(`编辑消息失败：${message}`)
     }
-  }
+  }, undefined)
 
-  const handleDeleteMessage = async (messageId: string) => {
+  const handleDeleteMessage = async (messageId: string) => runConversationMutation(async () => {
     if (!activeConversation || !ensureNoActiveGeneration('删除消息')) {
       return
     }
@@ -771,9 +819,9 @@ function AppContent() {
         error instanceof Error ? error.message : '删除消息失败，请稍后重试。'
       window.alert(`删除消息失败：${message}`)
     }
-  }
+  }, undefined)
 
-  const handleRegenerateMessage = async (messageId: string) => {
+  const handleRegenerateMessage = async (messageId: string) => runConversationMutation(async () => {
     if (!activeConversation || !ensureNoActiveGeneration('重新生成')) {
       return
     }
@@ -792,7 +840,7 @@ function AppContent() {
         current === conversationId ? null : current,
       )
     }
-  }
+  }, undefined)
 
   const handleExportConversation = async (
     conversationId: string,
@@ -1473,7 +1521,7 @@ function AppContent() {
     return debugKnowledgeBaseRetrieval(knowledgeBaseId, query, documentId, searchMode)
   }
 
-  const handleSendMessage = async (content: string) => {
+  const handleSendMessage = async (content: string) => runConversationMutation(async () => {
     if (!activeConversation) {
       return false
     }
@@ -1917,7 +1965,7 @@ function AppContent() {
       }
     }
     return inputConsumed
-  }
+  }, false)
 
   const handleSaveSettings = async (nextConfig: AppConfig) => persistConfigToBackend(nextConfig)
 
@@ -1930,6 +1978,7 @@ function AppContent() {
   }
 
   const handleOpenCitationSource = (source: ChatSourceMetadata) => {
+    if (!conversationOperationGuard.isCurrent(conversationResetKey)) return
     if (!source.knowledgeBaseId || !source.documentId) {
       return
     }
@@ -1953,12 +2002,23 @@ function AppContent() {
   return (
     <>
       <LoadingBar loading={globalLoading} />
+      <ClearAllConversationsDialog
+        open={showClearAllConfirm}
+        conversationCount={clearAllState.totalCount}
+        isClearing={isClearingConversations}
+        canConfirm={clearAllState.canClear}
+        onConfirm={() => { void handleClearAllConversations() }}
+        onCancel={() => {
+          if (!conversationOperationGuard.isClearing) setShowClearAllConfirm(false)
+        }}
+      />
       <div
         className={`chat-page workspace-${activeWorkspace} ${
           activeWorkspace === 'chat' && sidebarOpen ? 'context-open' : 'context-closed'
         }`}
       >
         <Sidebar
+          key={conversationResetKey}
           isOpen={sidebarOpen}
           onToggle={() => setSidebarOpen((current) => !current)}
           activeWorkspace={activeWorkspace}
@@ -1969,10 +2029,15 @@ function AppContent() {
           onCreateConversation={handleCreateConversation}
           onRenameConversation={handleRenameConversation}
           onDeleteConversation={handleDeleteConversation}
+          onClearAllConversations={handleRequestClearAllConversations}
+          isGenerating={Boolean(streamingConversationId)}
+          isClearingConversations={isClearingConversations}
+          isConversationMutating={isConversationMutating}
         />
 
         {activeWorkspace === 'chat' && (
           <ChatArea
+            key={conversationResetKey}
             sidebarOpen={sidebarOpen}
             activeConversation={activeConversation}
             selectedKnowledgeBase={selectedKnowledgeBase}

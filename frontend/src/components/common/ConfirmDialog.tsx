@@ -7,6 +7,8 @@ interface ConfirmDialogProps {
   message: string
   confirmText?: string
   cancelText?: string
+  confirmDisabled?: boolean
+  cancelDisabled?: boolean
   onConfirm: () => void
   onCancel: () => void
 }
@@ -17,6 +19,8 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   message,
   confirmText = '确认',
   cancelText = '取消',
+  confirmDisabled = false,
+  cancelDisabled = false,
   onConfirm,
   onCancel,
 }) => {
@@ -26,13 +30,13 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   useModalFocusTrap(backdropRef, {
     enabled: open,
     initialFocusRef: cancelButtonRef,
-    onClose: onCancel,
+    onClose: cancelDisabled ? undefined : onCancel,
   })
 
   if (!open) return null
 
   return (
-    <div className="confirm-backdrop" onClick={onCancel} ref={backdropRef}>
+    <div className="confirm-backdrop" onClick={cancelDisabled ? undefined : onCancel} ref={backdropRef}>
       <div
         aria-describedby="confirm-dialog-message"
         aria-labelledby="confirm-dialog-title"
@@ -44,10 +48,10 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         <div className="confirm-header" id="confirm-dialog-title">{title}</div>
         <div className="confirm-body" id="confirm-dialog-message">{message}</div>
         <div className="confirm-footer">
-          <button className="confirm-btn confirm-btn--cancel" onClick={onCancel} ref={cancelButtonRef}>
+          <button type="button" className="confirm-btn confirm-btn--cancel" onClick={onCancel} ref={cancelButtonRef} disabled={cancelDisabled}>
             {cancelText}
           </button>
-          <button className="confirm-btn confirm-btn--confirm" onClick={onConfirm}>
+          <button type="button" className="confirm-btn confirm-btn--confirm" onClick={onConfirm} disabled={confirmDisabled}>
             {confirmText}
           </button>
         </div>

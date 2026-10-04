@@ -67,6 +67,7 @@ func NewRouter(appHandler *handler.AppHandler, configHandler *handler.ConfigHand
 		api.GET("/conversations", appHandler.ListConversations)
 		api.GET("/conversations/:id", appHandler.GetConversation)
 		api.PUT("/conversations/:id", appHandler.SaveConversation)
+		api.DELETE("/conversations", appHandler.DeleteAllConversations)
 		api.DELETE("/conversations/:id", appHandler.DeleteConversation)
 		api.PUT("/conversations/:id/messages/:msgId", appHandler.EditMessage)
 		api.DELETE("/conversations/:id/messages/:msgId", appHandler.DeleteMessage)

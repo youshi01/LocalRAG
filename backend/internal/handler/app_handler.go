@@ -217,6 +217,9 @@ func (h *AppHandler) DeleteMessage(c *gin.Context) {
 }
 
 func (h *AppHandler) RegenerateMessage(c *gin.Context) {
+	finish := h.appService.BeginConversationRequest()
+	defer finish()
+
 	conversationID := c.Param("id")
 	messageID := c.Param("msgId")
 
@@ -654,6 +657,9 @@ func (h *AppHandler) ReindexDocument(c *gin.Context) {
 }
 
 func (h *AppHandler) ChatCompletions(c *gin.Context) {
+	finish := h.appService.BeginConversationRequest()
+	defer finish()
+
 	var req model.ChatCompletionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeError(c, http.StatusBadRequest, "invalid chat request body")
@@ -744,6 +750,9 @@ func (h *AppHandler) ChatCompletions(c *gin.Context) {
 }
 
 func (h *AppHandler) ChatCompletionsStream(c *gin.Context) {
+	finish := h.appService.BeginConversationRequest()
+	defer finish()
+
 	var req model.ChatCompletionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeError(c, http.StatusBadRequest, "invalid chat request body")

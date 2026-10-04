@@ -130,46 +130,47 @@ func normalizeServiceContext(ctx context.Context) context.Context {
 }
 
 type AppService struct {
-	state                 *model.AppState
-	store                 *AppStateStore
-	chatHistory           ChatHistoryStore
-	qdrant                *QdrantService
-	rag                   *RagService
-	indexedContentStore   *IndexedContentStore
-	serverConfig          model.ServerConfig
-	staging               *UploadStagingService
-	stateSaveMu           sync.Mutex
-	reranker              SemanticReranker
-	queryRewriter         QueryRewriter
-	retrievalPlanner      RetrievalPlanner
-	semanticCache         *SemanticCache
-	contextCompressor     ContextCompressor
-	retrievalOrchestrator *RetrievalOrchestrator
-	mcpDangerMu           sync.Mutex
-	mcpDangerConfirms     map[string]mcpDangerConfirmationRecord
-	mcpDangerRates        map[string][]time.Time
-	mcpJobMu              sync.Mutex
-	mcpJobs               map[string]model.MCPJob
-	mcpJobCancels         map[string]context.CancelFunc
-	mcpJobRetries         map[string]mcpJobRetryAction
-	mcpJobRetrying        map[string]bool
-	mcpJobDescriptors     map[string]mcpJobDescriptor
-	mcpJobLeases          map[string]mcpJobLease
-	mcpJobStagingLeases   map[string]map[string]mcpStagingLease
-	mcpJobStore           *MCPJobStore
-	mcpWorkerID           string
-	mcpJobLifecycleMu     sync.Mutex
-	mcpJobWG              sync.WaitGroup
-	mcpJobRecoveryStop    chan struct{}
-	mcpJobRecoveryOnce    sync.Once
-	mcpJobRecoveryWG      sync.WaitGroup
-	mcpJobRecoverySlots   chan struct{}
-	mcpJobsShutdown       bool
-	mcpJobStatsMu         sync.Mutex
-	mcpJobPersistenceFail int64
-	mcpJobLastFailureAt   string
-	indexReservationMu    sync.Mutex
-	indexReservations     map[string]chan struct{}
+	state                   *model.AppState
+	store                   *AppStateStore
+	chatHistory             ChatHistoryStore
+	qdrant                  *QdrantService
+	rag                     *RagService
+	indexedContentStore     *IndexedContentStore
+	serverConfig            model.ServerConfig
+	staging                 *UploadStagingService
+	stateSaveMu             sync.Mutex
+	conversationLifecycleMu sync.RWMutex
+	reranker                SemanticReranker
+	queryRewriter           QueryRewriter
+	retrievalPlanner        RetrievalPlanner
+	semanticCache           *SemanticCache
+	contextCompressor       ContextCompressor
+	retrievalOrchestrator   *RetrievalOrchestrator
+	mcpDangerMu             sync.Mutex
+	mcpDangerConfirms       map[string]mcpDangerConfirmationRecord
+	mcpDangerRates          map[string][]time.Time
+	mcpJobMu                sync.Mutex
+	mcpJobs                 map[string]model.MCPJob
+	mcpJobCancels           map[string]context.CancelFunc
+	mcpJobRetries           map[string]mcpJobRetryAction
+	mcpJobRetrying          map[string]bool
+	mcpJobDescriptors       map[string]mcpJobDescriptor
+	mcpJobLeases            map[string]mcpJobLease
+	mcpJobStagingLeases     map[string]map[string]mcpStagingLease
+	mcpJobStore             *MCPJobStore
+	mcpWorkerID             string
+	mcpJobLifecycleMu       sync.Mutex
+	mcpJobWG                sync.WaitGroup
+	mcpJobRecoveryStop      chan struct{}
+	mcpJobRecoveryOnce      sync.Once
+	mcpJobRecoveryWG        sync.WaitGroup
+	mcpJobRecoverySlots     chan struct{}
+	mcpJobsShutdown         bool
+	mcpJobStatsMu           sync.Mutex
+	mcpJobPersistenceFail   int64
+	mcpJobLastFailureAt     string
+	indexReservationMu      sync.Mutex
+	indexReservations       map[string]chan struct{}
 }
 
 type mcpDangerConfirmationRecord struct {
@@ -5059,6 +5060,8 @@ func (s *AppService) ContextMessageLimit() int {
 }
 
 func (s *AppService) SaveConversation(req model.SaveConversationRequest) (*model.Conversation, error) {
+	finish := s.BeginConversationRequest()
+	defer finish()
 	if s == nil {
 		return nil, fmt.Errorf("app service is nil")
 	}
@@ -5220,6 +5223,8 @@ func (s *AppService) GetConversation(id string) (*model.Conversation, error) {
 }
 
 func (s *AppService) DeleteConversation(id string) error {
+	finish := s.BeginConversationRequest()
+	defer finish()
 	if s == nil {
 		return fmt.Errorf("app service is nil")
 	}
@@ -5230,6 +5235,8 @@ func (s *AppService) DeleteConversation(id string) error {
 }
 
 func (s *AppService) EditMessage(conversationID, messageID string, req model.EditMessageRequest) (*model.Conversation, error) {
+	finish := s.BeginConversationRequest()
+	defer finish()
 	if s == nil {
 		return nil, fmt.Errorf("app service is nil")
 	}
@@ -5282,6 +5289,8 @@ func (s *AppService) EditMessage(conversationID, messageID string, req model.Edi
 }
 
 func (s *AppService) DeleteMessage(conversationID, messageID string) (*model.Conversation, error) {
+	finish := s.BeginConversationRequest()
+	defer finish()
 	if s == nil {
 		return nil, fmt.Errorf("app service is nil")
 	}

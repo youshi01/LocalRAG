@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import type { Conversation, WorkspaceView } from '../App'
 import AppIcon from './common/AppIcon'
 import ThemeToggle from './common/ThemeToggle'
+import { getClearAllConversationState } from '../app/conversationReset'
 
 interface SidebarProps {
   isOpen: boolean
@@ -14,6 +15,10 @@ interface SidebarProps {
   onCreateConversation: () => void
   onRenameConversation: (conversationId: string, title: string) => void
   onDeleteConversation: (conversationId: string) => void
+  onClearAllConversations: () => void
+  isGenerating?: boolean
+  isClearingConversations?: boolean
+  isConversationMutating?: boolean
 }
 
 const formatDateTime = (value: string) =>
@@ -45,12 +50,20 @@ const Sidebar: React.FC<SidebarProps> = ({
   onCreateConversation,
   onRenameConversation,
   onDeleteConversation,
+  onClearAllConversations,
+  isGenerating = false,
+  isClearingConversations = false,
+  isConversationMutating = false,
 }) => {
   const [menuConversationId, setMenuConversationId] = useState<string | null>(null)
   const [editingConversationId, setEditingConversationId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
   const [isComposingTitle, setIsComposingTitle] = useState(false)
   const [conversationFilter, setConversationFilter] = useState('')
+  // Eligibility and deletion scope always use the full collection, not search results.
+  const clearAllState = getClearAllConversationState(conversations, {
+    isGenerating, isClearing: isClearingConversations, isMutating: isConversationMutating,
+  })
 
   const filteredConversations = useMemo(() => {
     const query = conversationFilter.trim().toLowerCase()
@@ -59,7 +72,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   }, [conversations, conversationFilter])
 
   const finishRename = (conversation: Conversation) => {
-    if (isComposingTitle) return
+    if (isComposingTitle || isClearingConversations) return
     const nextTitle = editingTitle.trim()
     setEditingConversationId(null)
     if (nextTitle && nextTitle !== conversation.title.trim()) {
@@ -113,21 +126,34 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {activeWorkspace === 'chat' && (
-        <section className="conversation-sidebar" aria-hidden={!isOpen}>
+        <section className="conversation-sidebar" aria-hidden={!isOpen} aria-busy={isClearingConversations}>
           <header className="conversation-sidebar-header">
             <div>
               <span className="conversation-sidebar-kicker">LocalRAG</span>
               <h1>会话</h1>
             </div>
-            <button
-              type="button"
-              className="conversation-create-button"
-              onClick={onCreateConversation}
-              aria-label="新建会话"
-              title="新建会话"
-            >
-              <AppIcon name="plus" size={18} />
-            </button>
+            <div className="conversation-header-actions">
+              <button
+                type="button"
+                className="conversation-create-button"
+                onClick={onCreateConversation}
+                aria-label="新建会话"
+                title="新建会话"
+                disabled={isClearingConversations}
+              >
+                <AppIcon name="plus" size={18} />
+              </button>
+              <button
+                type="button"
+                className="conversation-create-button conversation-clear-all-button"
+                onClick={onClearAllConversations}
+                aria-label="清空本项目全部会话"
+                title={clearAllState.disabledReason || '清空本项目全部会话'}
+                disabled={!clearAllState.canClear}
+              >
+                <AppIcon name={isClearingConversations ? 'loader' : 'trash'} size={18} />
+              </button>
+            </div>
           </header>
 
           <label className="conversation-search">
@@ -161,6 +187,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       <input
                         className="conversation-title-input"
                         type="text"
+                        disabled={isClearingConversations}
                         value={editingTitle}
                         autoFocus
                         onFocus={(event) => event.currentTarget.select()}
@@ -190,6 +217,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <button
                       type="button"
                       className={`conversation-item ${isActive ? 'active' : ''}`}
+                      disabled={isClearingConversations}
                       onClick={() => {
                         setMenuConversationId(null)
                         setEditingConversationId(null)
@@ -212,6 +240,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       className="conversation-menu-trigger"
                       aria-label="打开会话菜单"
                       title="会话操作"
+                      disabled={isClearingConversations}
                       onClick={(event) => {
                         event.stopPropagation()
                         setEditingConversationId(null)

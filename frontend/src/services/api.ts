@@ -731,7 +731,11 @@ export const applyCSRFHeader = (headers: Headers, init?: RequestInit) => {
   }
 }
 
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+async function requestJson<T>(
+  path: string,
+  init?: RequestInit,
+  errorMessages?: Partial<Record<number, (message: string) => string>>,
+): Promise<T> {
   const headers = new Headers(init?.headers)
   applyCSRFHeader(headers, init)
 
@@ -747,7 +751,8 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!response.ok) {
-    throw new Error(await extractErrorMessage(response))
+    const message = await extractErrorMessage(response)
+    throw new Error(errorMessages?.[response.status]?.(message) ?? message)
   }
 
   const data = await parseJsonResponse<T>(response)
@@ -937,7 +942,7 @@ export const fetchInitialAppData = async () => {
   const [knowledgeBaseData, configData, conversationsData] = await Promise.all([
     requestJson<KnowledgeBaseListResponse>('/api/knowledge-bases'),
     requestJson<ConfigResponse>('/api/config'),
-    requestJson<ConversationListResponse>('/api/conversations'),
+    requestJson<ConversationListResponse>('/api/conversations', { cache: 'no-store' }),
   ])
 
   return {
@@ -1009,7 +1014,7 @@ export const testEmbeddingModelConfig = async (
 )
 
 export const fetchConversationDetail = async (conversationId: string): Promise<Conversation> => (
-  normalizeConversation(await requestJson<BackendConversation>(`/api/conversations/${conversationId}`))
+  normalizeConversation(await requestJson<BackendConversation>(`/api/conversations/${conversationId}`, { cache: 'no-store' }))
 )
 
 export const saveConversation = async (
@@ -1026,6 +1031,27 @@ export const saveConversation = async (
 
 export const deleteConversation = async (conversationId: string): Promise<void> => {
   await requestOk(`/api/conversations/${conversationId}`, { method: 'DELETE' })
+}
+
+export interface ClearAllConversationsResponse {
+  deletedCount: number
+  message?: string
+}
+
+export const clearAllConversations = async (): Promise<ClearAllConversationsResponse> => {
+  const response = await requestJson<ClearAllConversationsResponse>(
+    '/api/conversations',
+    jsonRequest({ confirm: true }, { method: 'DELETE' }),
+    {
+      409: (message) => /[\u3400-\u9fff]/u.test(message)
+        ? message
+        : '当前有会话正在生成或修改，请等待完成后再清空本项目全部会话。',
+    },
+  )
+  if (!Number.isInteger(response.deletedCount) || response.deletedCount < 0) {
+    throw new Error('清空会话接口返回了无效的删除数量')
+  }
+  return response
 }
 
 export const createKnowledgeBase = async (

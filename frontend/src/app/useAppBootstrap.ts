@@ -7,9 +7,11 @@ import {
 } from '../services/api'
 import { createEmptyConversation } from './appHelpers'
 import { normalizeAppConfig } from './appConfig'
+import { loadCurrentConversationData, type ConversationOperationGuard } from './conversationReset'
 import type { AppConfig, Conversation, KnowledgeBase } from '../App'
 
 interface UseAppBootstrapOptions {
+  conversationOperationGuard: ConversationOperationGuard
   isAuthenticated: boolean
   logout: () => Promise<void>
   setKnowledgeBases: Dispatch<SetStateAction<KnowledgeBase[]>>
@@ -35,6 +37,7 @@ const sleep = (delayMs: number) => new Promise((resolve) => {
 })
 
 export const useAppBootstrap = ({
+  conversationOperationGuard,
   isAuthenticated,
   logout,
   setKnowledgeBases,
@@ -135,17 +138,19 @@ export const useAppBootstrap = ({
 
     let canceled = false
 
+    const revision = conversationOperationGuard.revision
     const bootstrapApp = async () => {
-      while (!canceled) {
+      while (!canceled && conversationOperationGuard.isCurrent(revision)) {
         try {
           const isReady = await waitForBackendReady()
           if (!isReady) {
             throw new Error('backend is not ready')
           }
 
-          const initialData = await fetchInitialAppData()
+          if (canceled || !conversationOperationGuard.isCurrent(revision)) return
+          const initialData = await loadCurrentConversationData(conversationOperationGuard, fetchInitialAppData)
 
-          if (canceled) {
+          if (canceled || !initialData || !conversationOperationGuard.isCurrent(revision)) {
             return
           }
 
@@ -153,7 +158,11 @@ export const useAppBootstrap = ({
           setConfig((prev) => normalizeAppConfig(initialData.config, prev))
           const conversationItems = initialData.conversations
           if (conversationItems.length > 0) {
-            const firstConversation = await fetchConversationDetail(conversationItems[0].id)
+            const firstConversation = await loadCurrentConversationData(
+              conversationOperationGuard,
+              () => fetchConversationDetail(conversationItems[0].id),
+            )
+            if (!firstConversation) return
             const restConversations = conversationItems.slice(1).map((conversation) => ({
               id: conversation.id,
               title: conversation.title,
@@ -165,7 +174,7 @@ export const useAppBootstrap = ({
               messages: [],
             }))
 
-            if (canceled) {
+            if (canceled || !conversationOperationGuard.isCurrent(revision)) {
               return
             }
 
@@ -193,7 +202,7 @@ export const useAppBootstrap = ({
           setBackendReady(true)
           return
         } catch (error) {
-          if (canceled) {
+          if (canceled || !conversationOperationGuard.isCurrent(revision)) {
             return
           }
 
@@ -212,6 +221,7 @@ export const useAppBootstrap = ({
   }, [
     authCheckDone,
     authRequired,
+    conversationOperationGuard,
     isAuthenticated,
     setActiveConversationId,
     setConfig,

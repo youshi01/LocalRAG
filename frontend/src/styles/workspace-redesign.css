@@ -204,11 +204,27 @@ body,
   transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
 }
 
-.conversation-create-button:hover,
+.conversation-create-button:hover:not(:disabled),
 .workspace-page-back:hover {
   border-color: var(--border-color-hover);
   background: var(--surface-secondary);
   color: var(--text-primary);
+}
+
+.conversation-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.conversation-clear-all-button:not(:disabled) {
+  color: var(--color-error);
+}
+
+.conversation-create-button:disabled,
+.confirm-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .conversation-search {

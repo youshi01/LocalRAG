@@ -30,6 +30,7 @@ const normalizeSources = (sources?: ChatSourceMetadata[]) => {
 }
 
 const sourceTypeLabel = (source: ChatSourceMetadata) => {
+  if (source.sourceType === 'document-inventory') return '文件目录'
   if (source.sourceType === 'structured-data') return '结构化数据'
   if (source.chunkKind) return chunkKindLabel(source.chunkKind)
   return '来源'
@@ -65,7 +66,9 @@ const MessageCitations: React.FC<MessageCitationsProps> = ({
   citationSupport,
   onOpenCitationSource,
 }) => {
-  const visibleSources = normalizeSources(sources).slice(0, 6)
+  const directoryEvidence = citationSupport?.basis === 'document_inventory'
+  const normalizedSources = normalizeSources(sources)
+  const visibleSources = normalizedSources.slice(0, 6)
   const [expanded, setExpanded] = useState(true)
   if (visibleSources.length === 0 && !citationSupport) return null
 
@@ -76,17 +79,24 @@ const MessageCitations: React.FC<MessageCitationsProps> = ({
       onToggle={(event) => setExpanded(event.currentTarget.open)}
     >
       <summary>
-        <span>引用来源</span>
-        <strong>{visibleSources.length}</strong>
+        <span>{directoryEvidence ? '目录来源' : '引用来源'}</span>
+        <strong>{directoryEvidence ? normalizedSources.length : visibleSources.length}</strong>
       </summary>
       {citationSupport && (
         <div className={`message-citation-support message-citation-support-${citationSupport.status}`}>
-          <strong>{supportLabel(citationSupport.status)}</strong>
+          <strong>{directoryEvidence ? (citationSupport.status === 'supported' ? '文件目录已核对' : '尚未选择知识库目录') : supportLabel(citationSupport.status)}</strong>
           <span>
-            {citationSupport.supportedClaimCount}/{citationSupport.claimCount} 条陈述已核对
+            {directoryEvidence
+              ? citationSupport.claimCount === 0
+                ? citationSupport.status === 'supported' ? '目录为空（0 份文件）' : '请选择知识库后查询目录'
+                : `${citationSupport.supportedClaimCount}/${citationSupport.claimCount} 份文件已核对`
+              : `${citationSupport.supportedClaimCount}/${citationSupport.claimCount} 条陈述已核对`}
           </span>
-          {citationSupport.status === 'partial' && <span>{citationSupport.summary}</span>}
+          {(directoryEvidence || citationSupport.status === 'partial') && <span>{citationSupport.summary}</span>}
         </div>
+      )}
+      {directoryEvidence && normalizedSources.length > visibleSources.length && (
+        <p className="message-citation-excerpt">清单已核对全部 {normalizedSources.length} 份文件，下方展示前 {visibleSources.length} 条目录记录。</p>
       )}
       <div className="message-citation-list">
         {visibleSources.map((source, index) => (

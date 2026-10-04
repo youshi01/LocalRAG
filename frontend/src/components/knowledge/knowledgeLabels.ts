@@ -21,6 +21,7 @@ export const healthStatusLabel = (status: KnowledgeBaseHealthResponse['status'])
 }
 
 export const chunkKindLabel = (kind: string): string => {
+  if (kind === 'document_inventory') return '文件目录'
   if (kind === 'structured_summary') return '摘要'
   if (kind === 'structured_row') return '数据行'
   return '正文'

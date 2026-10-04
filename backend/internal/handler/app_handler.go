@@ -271,6 +271,22 @@ func (h *AppHandler) RegenerateMessage(c *gin.Context) {
 		Messages:        chatMessages,
 	}
 
+	if inventory, matched, inventoryErr := h.appService.BuildDocumentInventoryAnswer(req); matched {
+		if inventoryErr != nil {
+			writeChatPreparationError(c, inventoryErr)
+			return
+		}
+		metadata := documentInventoryMetadata(req, inventory)
+		response := model.ChatCompletionResponse{ID: fmt.Sprintf("inventory-%d", time.Now().UnixNano()), Object: "chat.completion", Created: time.Now().Unix(), Model: "localrag-document-inventory", Choices: []model.ChatCompletionChoice{{Index: 0, Message: model.ChatMessage{Role: "assistant", Content: inventory.Content}}}, Metadata: metadata}
+		updated, saveErr := h.appService.SaveConversation(model.SaveConversationRequest{ID: conversationID, Title: conversation.Title, KnowledgeBaseID: conversation.KnowledgeBaseID, DocumentID: conversation.DocumentID, Messages: buildStoredConversationMessages(chatMessages, inventory.Content, metadata)})
+		if saveErr != nil {
+			writeError(c, http.StatusInternalServerError, saveErr.Error())
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"conversation": updated, "response": response})
+		return
+	}
+
 	preparedReq, sources, err := h.prepareChatRequest(req)
 	if err != nil {
 		writeChatPreparationError(c, err)
@@ -644,6 +660,10 @@ func (h *AppHandler) ChatCompletions(c *gin.Context) {
 		return
 	}
 
+	if h.serveDocumentInventory(c, req, false) {
+		return
+	}
+
 	if content, sources, structuredData, ok, err := h.fullTableAnswer(req); err != nil {
 		writeChatPreparationError(c, err)
 		return
@@ -727,6 +747,10 @@ func (h *AppHandler) ChatCompletionsStream(c *gin.Context) {
 	var req model.ChatCompletionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		writeError(c, http.StatusBadRequest, "invalid chat request body")
+		return
+	}
+
+	if h.serveDocumentInventory(c, req, true) {
 		return
 	}
 

@@ -84,6 +84,7 @@ export interface CitationClaimSupport {
 }
 
 export interface CitationSupportMetadata {
+  basis?: 'document_inventory' | string
   status: 'supported' | 'partial' | 'unsupported' | 'abstained' | string
   summary: string
   claimCount: number
